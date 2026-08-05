@@ -39,45 +39,4 @@ jobs:
           git config --global user.name 'Email Bot'
           git config --global user.email 'bot@users.noreply.github.com'
           git add screenshot.png latest_5.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "📬 Update emails" && git push)name: Check LaPoste Emails
-
-on:
-  schedule:
-    - cron: '*/15 * * * *'
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  scrape-emails:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      - name: Install Puppeteer
-        run: |
-          npm init -y
-          npm install puppeteer
-      
-      - name: Scrape emails
-        run: node scraper.js
-        env:
-          LAPOSTE_EMAIL: ${{ secrets.LAPOSTE_EMAIL }}
-          LAPOSTE_PASSWORD: ${{ secrets.LAPOSTE_PASSWORD }}
-      
-      - name: Commit and push if changed
-        run: |
-          git config --global user.name 'Email Bot'
-          git config --global user.email 'bot@users.noreply.github.com'
-          git add latest_5.json screenshot.png
           git diff --quiet && git diff --staged --quiet || (git commit -m "📬 Update emails" && git push)
