@@ -140,7 +140,7 @@
             color: var(--text-secondary);
         }
 
-        /* Screenshot Section */
+        /* Screenshot Section (toujours visible) */
         .screenshot-section {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
@@ -150,25 +150,43 @@
         }
 
         .screenshot-header {
-            cursor: pointer;
             display: flex;
             align-items: center;
             gap: 0.5rem;
             margin-bottom: 0.75rem;
-            user-select: none;
-        }
-
-        .screenshot-header:hover {
-            color: var(--accent);
+            font-weight: 500;
+            color: var(--text-primary);
         }
 
         .screenshot-img {
             width: 100%;
-            max-height: 500px;
+            max-height: 600px;
             object-fit: contain;
             border-radius: 0.5rem;
-            display: none;
             border: 1px solid var(--border);
+            display: block;
+        }
+
+        .screenshot-controls {
+            margin-top: 0.5rem;
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        .screenshot-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.3s;
+        }
+
+        .screenshot-btn:hover {
+            background: var(--accent-hover);
         }
 
         /* Email List */
@@ -337,13 +355,16 @@
             >
         </div>
 
-        <!-- Screenshot Viewer -->
-        <div class="screenshot-section" id="screenshotSection">
-            <div class="screenshot-header" onclick="toggleScreenshot()">
+        <!-- Screenshot Viewer : Aperçu permanent de la boîte mail -->
+        <div class="screenshot-section">
+            <div class="screenshot-header">
                 <span>📸</span>
-                <span>Aperçu de la boîte mail (cliquer pour afficher/masquer)</span>
+                <span>Aperçu de la boîte mail (mise à jour automatique)</span>
             </div>
-            <img id="screenshotImg" class="screenshot-img" src="" alt="Capture boîte mail" onerror="this.style.display='none'">
+            <img id="screenshotImg" class="screenshot-img" src="screenshot.png" alt="Capture de la boîte mail" onerror="this.style.display='none'">
+            <div class="screenshot-controls">
+                <button class="screenshot-btn" onclick="refreshScreenshot()">🔄 Actualiser l'image</button>
+            </div>
         </div>
 
         <!-- Email List -->
@@ -401,8 +422,7 @@
                             ${error.message}
                         </p>
                         <p style="color: var(--text-secondary); margin-top: 1rem; font-size: 0.9rem;">
-                            Vérifiez que le workflow GitHub Actions est actif<br>
-                            et que les secrets sont correctement configurés.
+                            L'aperçu de la boîte mail ci-dessus reste fonctionnel.
                         </p>
                     </div>
                 `;
@@ -421,7 +441,8 @@
                         <div class="empty-icon">📭</div>
                         <h3>Aucun email trouvé</h3>
                         <p style="color: var(--text-secondary); margin-top: 0.5rem;">
-                            Les emails apparaîtront ici une fois le premier scraping effectué.
+                            Les emails apparaîtront ici une fois l'extraction réussie.<br>
+                            En attendant, utilisez l'aperçu de la boîte mail ci-dessus.
                         </p>
                     </div>
                 `;
@@ -492,29 +513,20 @@
             return div.innerHTML;
         }
 
-        // Gestion de la capture d'écran
-        function toggleScreenshot() {
-            const img = document.getElementById('screenshotImg');
-            if (img.style.display === 'block') {
-                img.style.display = 'none';
-            } else {
-                img.style.display = 'block';
-                refreshScreenshot();
-            }
-        }
-
+        // Gestion de l'aperçu boîte mail
         function refreshScreenshot() {
             const img = document.getElementById('screenshotImg');
             if (img) {
                 img.src = `screenshot.png?t=${Date.now()}`;
-                img.style.display = img.style.display || 'none'; // Respecter l'état
+                img.style.display = 'block';
             }
         }
 
         // Chargement initial
         loadEmails();
+        refreshScreenshot();
 
-        // Rechargement périodique (10 minutes)
+        // Rechargement périodique
         setInterval(loadEmails, 600000);
         setInterval(refreshScreenshot, 600000);
     </script>
