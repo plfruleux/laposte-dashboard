@@ -138,10 +138,6 @@ async function scrapeLaposteEmails() {
         }
         
         if (!passwordInput) {
-            const html = await page.content();
-            fs.writeFileSync('debug.html', html);
-            await page.screenshot({ path: 'debug.png' });
-            console.log('📸 Debug sauvegardé');
             throw new Error('Champ mot de passe introuvable après validation email');
         }
         
@@ -166,56 +162,147 @@ async function scrapeLaposteEmails() {
             console.log('✅ Connexion cliquée');
         }
         
-        console.log('⏳ Attente de la boîte mail...');
-        await wait(8000);
+        // --- ATTENDRE LA BOÎTE DE RÉCEPTION ---
+        console.log('⏳ Attente de la boîte de réception...');
+        await wait(10000); // Attendre que la boîte mail soit complètement chargée
         
-        // --- ÉTAPE 5 : EXTRACTION DES EMAILS ---
+        // Sauvegarder une capture d'écran de la boîte mail
+        await page.screenshot({ path: 'screenshot.png' });
+        console.log('📸 Capture de la boîte mail sauvegardée');
+        
+        // --- ÉTAPE 5 : EXTRACTION PROPRE DES EMAILS ---
         console.log('📧 Extraction des emails...');
         
         const emails = await page.evaluate(() => {
+            // Fonction utilitaire : nettoyer un texte (enlever les espaces multiples, etc.)
+            const cleanText = (text) => text.replace(/\s+/g, ' ').trim();
+            
+            // Cibler les lignes de la liste des emails. Les sélecteurs sont spécifiques à Laposte.net.
+            // On essaie plusieurs sélecteurs connus pour les lignes de mails.
+            const selectors = [
+                '.mails-list-item',          // Ancienne interface ?
+                '.message-item',            // Interface classique
+                'tr[role="row"]',           // Tableau
+                '.msg-list__item',          // Nouvelle interface possible
+                '[data-testid="mail-item"]',
+                '.email-entry'
+            ];
+            let rows = [];
+            for (const sel of selectors) {
+                rows = document.querySelectorAll(sel);
+                if (rows.length > 1) break;
+            }
+            
+            // Si toujours rien, essayer de trouver des divs contenant une adresse email dans un enfant spécifique
+            if (rows.length === 0) {
+                const candidates = document.querySelectorAll('div, li');
+                rows = Array.from(candidates).filter(el => {
+                    // Vérifie que l'élément contient une adresse email et un sujet potentiel
+                    const text = el.textContent || '';
+                    const hasEmail = text.includes('@');
+                    // Exclut les éléments trop grands (probablement le conteneur principal)
+                    const isReasonableSize = el.offsetHeight > 20 && el.offsetHeight < 200;
+                    // Exclut les éléments qui contiennent des mots clés de navigation
+                    const hasNavigation = /Boîte de réception|Dossiers|Menu|Paramètres|Agenda|Contacts/i.test(text);
+                    return hasEmail && isReasonableSize && !hasNavigation;
+                });
+            }
+            
             const results = [];
-            const allElements = document.querySelectorAll('div, li, tr, article');
-            const emailElements = Array.from(allElements).filter(el => {
-                const text = el.textContent || '';
-                return text.includes('@') && el.children.length >= 2 && el.offsetHeight > 30;
+            rows.slice(0, 25).forEach((row, idx) => {
+                try {
+                    const text = row.textContent || '';
+                    // Ignorer les lignes qui sont clairement des menus ou des messages d'erreur
+                    if (text.includes('k-error-messages') || 
+                        text.includes('Activer JavaScript') ||
+                        text.includes('Dossiers (Sauter)') ||
+                        text.includes('Menu Réduire le menu') ||
+                        text.includes('Liste de mails Sélection Etat') ||
+                        text.match(/^\s*Menu\s/)) {
+                        return;
+                    }
+                    
+                    // Extraire l'expéditeur (adresse email)
+                    const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                    const from = emailMatch ? emailMatch[0] : '';
+                    
+                    // Tenter de trouver le sujet : chercher un élément enfant avec une classe 'subject' ou 'object'
+                    let subject = '';
+                    const subjectEl = row.querySelector('[class*="subject"], [class*="objet"], [class*="title"], .subject, .object');
+                    if (subjectEl) {
+                        subject = cleanText(subjectEl.textContent);
+                    } else {
+                        // Sinon, extraire la première ligne significative (ni date, ni email)
+                        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+                        subject = lines.find(l => 
+                            !l.match(/^\d{2}[:\/]\d{2}/) && 
+                            !l.match(/^\d{2}\/\d{2}\/\d{4}/) &&
+                            !l.includes('@') &&
+                            !l.match(/^(Aujourd'hui|Hier|Il y a)/)
+                        ) || '';
+                        if (!subject) subject = text.substring(0, 80);
+                    }
+                    // Nettoyer le sujet de l'expéditeur s'il y est collé
+                    subject = subject.replace(emailMatch ? emailMatch[0] : '', '').trim();
+                    if (!subject || subject.length < 2) subject = '(Sans objet)';
+                    
+                    // Date
+                    let date = '';
+                    const dateEl = row.querySelector('[class*="date"], time, .time');
+                    if (dateEl) {
+                        date = cleanText(dateEl.textContent);
+                    } else {
+                        const dateMatch = text.match(/\d{2}\/\d{2}\/\d{4}/) || 
+                                        text.match(/\d{2}:\d{2}/) ||
+                                        text.match(/(Aujourd'hui|Hier|Il y a \d+ \w+)/i);
+                        date = dateMatch ? dateMatch[0] : '';
+                    }
+                    
+                    // Aperçu
+                    let preview = '';
+                    const previewEl = row.querySelector('[class*="preview"], [class*="snippet"], [class*="body"], p');
+                    if (previewEl) {
+                        preview = cleanText(previewEl.textContent).substring(0, 200);
+                    } else {
+                        // Nettoyer le texte brut en retirant sujet, expéditeur, date
+                        let clean = text;
+                        if (subject) clean = clean.replace(subject, '');
+                        if (from) clean = clean.replace(from, '');
+                        if (date) clean = clean.replace(date, '');
+                        clean = clean.replace(/\s+/g, ' ').trim();
+                        preview = clean.substring(0, 200);
+                    }
+                    
+                    // Statut non lu (détection par classe ou style)
+                    const isUnread = row.classList.contains('unread') || 
+                                   row.classList.contains('new') ||
+                                   row.innerHTML.includes('font-weight:700') ||
+                                   row.innerHTML.includes('font-weight: 700') ||
+                                   row.innerHTML.includes('<b>') ||
+                                   row.innerHTML.includes('<strong>');
+                    
+                    // On n'ajoute que si on a au moins un expéditeur ou un sujet pertinent
+                    if (from || (subject && subject.length > 5)) {
+                        results.push({
+                            id: `email-${idx}-${Date.now()}`,
+                            subject: subject,
+                            from: from || 'Inconnu',
+                            date: date,
+                            preview: preview + (preview.length > 0 ? '...' : ''),
+                            isUnread: Boolean(isUnread),
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                    
+                } catch (e) {
+                    // Ignorer les erreurs sur un élément
+                }
             });
             
-            emailElements.slice(0, 20).forEach((el, index) => {
-                try {
-                    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-                    const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z]{2,})/);
-                    const from = emailMatch ? emailMatch[0] : 'Inconnu';
-                    const lines = text.split(/[.!?]\s+/).filter(l => l.length > 5);
-                    const subject = lines[0] ? lines[0].substring(0, 100) : 'Sans objet';
-                    const dateMatch = text.match(/\d{2}[\/-]\d{2}[\/-]\d{4}/) || 
-                                    text.match(/\d{2}:\d{2}/) ||
-                                    text.match(/(Aujourd'hui|Hier|Il y a \d+)/);
-                    const date = dateMatch ? dateMatch[0] : '';
-                    const preview = text.substring(0, 150);
-                    const html = el.innerHTML || '';
-                    const isUnread = html.includes('font-weight:700') || 
-                                   html.includes('font-weight: 700') ||
-                                   html.includes('<b>') ||
-                                   html.includes('<strong>');
-                    
-                    results.push({
-                        id: `email-${index}-${Date.now()}`,
-                        subject: subject,
-                        from: from,
-                        date: date,
-                        preview: preview + '...',
-                        isUnread: Boolean(isUnread),
-                        timestamp: new Date().toISOString()
-                    });
-                } catch (err) {}
-            });
             return results;
         });
-        
-        // Sauvegarder une capture de la boîte mail
-        await page.screenshot({ path: 'screenshot.png' });
-        console.log('📸 Capture de la boîte mail sauvegardée');
 
+        // Sauvegarde des données
         const data = {
             lastUpdate: new Date().toISOString(),
             emailCount: emails.length,
@@ -226,10 +313,8 @@ async function scrapeLaposteEmails() {
         
     } catch (error) {
         console.error('❌ Erreur:', error.message);
-        
-        // Tenter une capture même en cas d'erreur
         try { await page.screenshot({ path: 'screenshot.png' }); } catch(e) {}
-
+        
         const errorData = {
             lastUpdate: new Date().toISOString(),
             emailCount: 0,
@@ -237,7 +322,6 @@ async function scrapeLaposteEmails() {
             emails: []
         };
         fs.writeFileSync('emails.json', JSON.stringify(errorData, null, 2));
-        
     } finally {
         await browser.close();
         console.log('🏁 Terminé');
