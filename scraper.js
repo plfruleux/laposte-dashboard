@@ -3,6 +3,16 @@ const fs = require('fs');
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Fonction pour cliquer sur un bouton contenant un texte
+async function clickButtonByText(page, text) {
+    const button = await page.$x(`//button[contains(text(), '${text}')]`);
+    if (button.length > 0) {
+        await button[0].click();
+        return true;
+    }
+    return false;
+}
+
 async function scrapeLaposteEmails() {
     console.log('🚀 Démarrage du scraping LaPoste.net...');
     
@@ -74,31 +84,25 @@ async function scrapeLaposteEmails() {
         // --- ÉTAPE 2 : VALIDER L'EMAIL ---
         console.log('🔘 Étape 2 : Validation email...');
         
-        const nextSelectors = [
-            'input[type="submit"]',
-            'button[type="submit"]',
-            '#submit_button',
-            '#next',
-            'button:has-text("Suivant")',
-            'button:has-text("Continuer")',
-            'button:has-text("Valider")',
-            '[data-testid="submit"]'
-        ];
+        // Essayer de cliquer sur "Suivant", "Continuer" ou "Valider"
+        let clicked = await clickButtonByText(page, 'Suivant');
+        if (!clicked) clicked = await clickButtonByText(page, 'Continuer');
+        if (!clicked) clicked = await clickButtonByText(page, 'Valider');
         
-        let clicked = false;
-        for (const sel of nextSelectors) {
-            const btn = await page.$(sel);
-            if (btn) {
-                await btn.click();
-                console.log(`✅ Clic sur bouton (${sel})`);
+        // Sinon, chercher un bouton submit
+        if (!clicked) {
+            const submitBtn = await page.$('input[type="submit"], button[type="submit"], #submit_button, #next');
+            if (submitBtn) {
+                await submitBtn.click();
                 clicked = true;
-                break;
             }
         }
         
         if (!clicked) {
             await page.keyboard.press('Enter');
-            console.log('✅ Entrée pressée');
+            console.log('✅ Entrée pressée (fallback)');
+        } else {
+            console.log('✅ Bouton de validation cliqué');
         }
         
         await wait(3000);
@@ -141,29 +145,22 @@ async function scrapeLaposteEmails() {
         // --- ÉTAPE 4 : CONNEXION FINALE ---
         console.log('🔘 Étape 4 : Connexion finale...');
         
-        const submitSelectors = [
-            'input[type="submit"]',
-            'button[type="submit"]',
-            '#submit_button',
-            '#login-submit',
-            'button:has-text("Connexion")',
-            'button:has-text("Se connecter")'
-        ];
+        let submitted = await clickButtonByText(page, 'Connexion');
+        if (!submitted) submitted = await clickButtonByText(page, 'Se connecter');
         
-        let submitted = false;
-        for (const sel of submitSelectors) {
-            const btn = await page.$(sel);
-            if (btn) {
-                await btn.click();
-                console.log(`✅ Connexion (${sel})`);
+        if (!submitted) {
+            const submitBtn = await page.$('input[type="submit"], button[type="submit"], #submit_button, #login-submit');
+            if (submitBtn) {
+                await submitBtn.click();
                 submitted = true;
-                break;
             }
         }
         
         if (!submitted) {
             await page.keyboard.press('Enter');
             console.log('✅ Connexion via Entrée');
+        } else {
+            console.log('✅ Connexion cliquée');
         }
         
         console.log('⏳ Attente de la boîte mail...');
