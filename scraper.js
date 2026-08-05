@@ -1,6 +1,9 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 
+// Fonction d'attente compatible
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function scrapeLaposteEmails() {
     console.log('🚀 Démarrage du scraping LaPoste.net...');
     
@@ -26,43 +29,29 @@ async function scrapeLaposteEmails() {
             timeout: 30000
         });
         
-        // Attendre que la page charge complètement
-        await page.waitForTimeout(3000);
+        await wait(3000);
         
         // 2. Accepter les cookies
         try {
             console.log('🍪 Gestion des cookies...');
-            const cookieSelectors = [
-                '#didomi-notice-agree-button',
-                '#cookie-agree',
-                '.cookie-accept',
-                'button[data-purpose="agree"]',
-                '#accept-all-cookies'
-            ];
-            
-            for (const selector of cookieSelectors) {
-                const button = await page.$(selector);
-                if (button) {
-                    await button.click();
-                    console.log('✅ Cookies acceptés');
-                    await page.waitForTimeout(1000);
-                    break;
-                }
+            const cookieButton = await page.$('#didomi-notice-agree-button');
+            if (cookieButton) {
+                await cookieButton.click();
+                console.log('✅ Cookies acceptés');
+                await wait(1000);
             }
         } catch (e) {
-            console.log('🍪 Pas de bannière cookies ou déjà acceptée');
+            console.log('🍪 Pas de bannière cookies');
         }
         
-        // 3. Connexion - approche multi-sélecteurs
-        console.log('🔐 Recherche du formulaire de connexion...');
+        // 3. Connexion
+        console.log('🔐 Recherche du formulaire...');
         
-        // Prendre une capture d'écran pour debug
-        await page.screenshot({ path: 'debug-login.png' });
-        
-        // Chercher les champs avec plusieurs sélecteurs possibles
+        // Chercher et remplir l'email
+        let emailFound = false;
         const emailSelectors = [
-            'input[name="email"]',
             'input[type="email"]',
+            'input[name="email"]',
             '#email',
             '#login-email',
             '#username',
@@ -73,9 +62,23 @@ async function scrapeLaposteEmails() {
             'input[id*="login"]'
         ];
         
+        for (const selector of emailSelectors) {
+            try {
+                await page.waitForSelector(selector, { timeout: 2000 });
+                await page.type(selector, process.env.LAPOSTE_EMAIL);
+                console.log(`✅ Email saisi: ${selector}`);
+                emailFound = true;
+                break;
+            } catch (e) {
+                continue;
+            }
+        }
+        
+        // Chercher et remplir le mot de passe
+        let passwordFound = false;
         const passwordSelectors = [
-            'input[name="password"]',
             'input[type="password"]',
+            'input[name="password"]',
             '#password',
             '#login-password',
             'input[placeholder*="mot de passe"]',
@@ -84,83 +87,43 @@ async function scrapeLaposteEmails() {
             'input[id*="pass"]'
         ];
         
-        const submitSelectors = [
-            'button[type="submit"]',
-            '#submit_button',
-            '#login-submit',
-            'button[data-purpose="submit"]',
-            '.login-button',
-            'input[type="submit"]',
-            'button:has-text("Connexion")',
-            'button:has-text("Se connecter")'
-        ];
-        
-        // Trouver et remplir l'email
-        let emailFound = false;
-        for (const selector of emailSelectors) {
-            try {
-                await page.waitForSelector(selector, { timeout: 3000 });
-                await page.type(selector, process.env.LAPOSTE_EMAIL);
-                console.log(`✅ Email saisi avec le sélecteur: ${selector}`);
-                emailFound = true;
-                break;
-            } catch (e) {
-                continue;
-            }
-        }
-        
-        if (!emailFound) {
-            // Essayer de trouver tous les inputs et prendre le premier de type email
-            console.log('⚠️ Sélecteurs standards non trouvés, recherche alternative...');
-            const inputs = await page.$$('input');
-            for (const input of inputs) {
-                const type = await input.evaluate(el => el.type);
-                if (type === 'email' || type === 'text') {
-                    await input.type(process.env.LAPOSTE_EMAIL);
-                    console.log('✅ Email saisi via recherche alternative');
-                    emailFound = true;
-                    break;
-                }
-            }
-        }
-        
-        // Trouver et remplir le mot de passe
-        let passwordFound = false;
         for (const selector of passwordSelectors) {
             try {
-                await page.waitForSelector(selector, { timeout: 3000 });
+                await page.waitForSelector(selector, { timeout: 2000 });
                 await page.type(selector, process.env.LAPOSTE_PASSWORD);
-                console.log(`✅ Mot de passe saisi avec le sélecteur: ${selector}`);
+                console.log(`✅ Mot de passe saisi: ${selector}`);
                 passwordFound = true;
                 break;
             } catch (e) {
                 continue;
-            }
-        }
-        
-        if (!passwordFound) {
-            const inputs = await page.$$('input[type="password"]');
-            if (inputs.length > 0) {
-                await inputs[0].type(process.env.LAPOSTE_PASSWORD);
-                console.log('✅ Mot de passe saisi via recherche alternative');
-                passwordFound = true;
             }
         }
         
         if (!emailFound || !passwordFound) {
-            throw new Error('Impossible de trouver les champs de connexion');
+            // Capture d'écran pour debug
+            await page.screenshot({ path: 'debug.png' });
+            console.log('📸 Capture sauvegardée (debug.png)');
+            throw new Error('Champs de connexion introuvables');
         }
         
-        // Cliquer sur le bouton de connexion
-        console.log('🔘 Recherche du bouton de connexion...');
-        let submitted = false;
+        // Cliquer sur connexion
+        console.log('🔘 Clic connexion...');
+        const submitSelectors = [
+            'button[type="submit"]',
+            '#submit_button',
+            '#login-submit',
+            'button:has-text("Connexion")',
+            'button:has-text("Se connecter")',
+            '.login-button'
+        ];
         
+        let submitted = false;
         for (const selector of submitSelectors) {
             try {
                 const button = await page.$(selector);
                 if (button) {
                     await button.click();
-                    console.log(`✅ Connexion avec le sélecteur: ${selector}`);
+                    console.log(`✅ Clic: ${selector}`);
                     submitted = true;
                     break;
                 }
@@ -170,90 +133,58 @@ async function scrapeLaposteEmails() {
         }
         
         if (!submitted) {
-            // Appuyer sur Entrée dans le champ mot de passe
-            console.log('⚠️ Bouton non trouvé, tentative avec Entrée...');
             await page.keyboard.press('Enter');
+            console.log('✅ Envoi via Entrée');
         }
         
         // 4. Attendre la boîte mail
-        console.log('⏳ Attente de la boîte mail...');
-        await page.waitForTimeout(8000);
+        console.log('⏳ Attente du chargement...');
+        await wait(8000);
         
-        // Prendre une capture de la boîte mail
-        await page.screenshot({ path: 'debug-inbox.png' });
-        
-        // 5. Extraire les emails (code identique à avant)
-        console.log('📧 Extraction des emails...');
+        // 5. Extraire les emails
+        console.log('📧 Extraction...');
         
         const emails = await page.evaluate(() => {
             const results = [];
             
-            // Chercher les lignes d'emails avec différents sélecteurs
-            const selectors = [
-                '.message-item', '.email-row', '.mail-item',
-                'tr[role="row"]', '.msg-list__item', '.list-group-item',
-                '[data-testid="email-item"]', '.email-entry',
-                'div[class*="mail"]', 'div[class*="message"]'
-            ];
-            
-            let emailElements = [];
-            for (const selector of selectors) {
-                const elements = document.querySelectorAll(selector);
-                if (elements.length > 2) {
-                    emailElements = Array.from(elements);
-                    break;
-                }
-            }
-            
-            // Fallback : chercher des éléments contenant "@"
-            if (emailElements.length === 0) {
-                const allElements = document.querySelectorAll('div, li, tr, article');
-                emailElements = Array.from(allElements).filter(el => {
-                    return el.textContent.includes('@') && 
-                           el.children.length >= 2 &&
-                           el.offsetHeight > 30;
-                });
-            }
+            // Chercher tous les éléments qui ressemblent à des emails
+            const allElements = document.querySelectorAll('div, li, tr, article');
+            const emailElements = Array.from(allElements).filter(el => {
+                const text = el.textContent || '';
+                return text.includes('@') && el.children.length >= 2 && el.offsetHeight > 30;
+            });
             
             emailElements.slice(0, 20).forEach((el, index) => {
                 try {
-                    const text = el.textContent || '';
-                    const html = el.innerHTML || '';
+                    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
                     
-                    // Sujet
-                    let subject = '';
-                    const subjectEl = el.querySelector('.subject, .object, .mail-subject, h3, h4, [class*="subject"], [class*="objet"]');
-                    if (subjectEl) {
-                        subject = subjectEl.textContent.trim();
-                    } else {
-                        const lines = text.split('\n').filter(l => l.trim().length > 3);
-                        subject = lines[0] || text.substring(0, 80);
-                    }
-                    
-                    // Expéditeur
-                    let from = '';
+                    // Extraire l'email de l'expéditeur
                     const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z]{2,})/);
-                    from = emailMatch ? emailMatch[0] : 'Inconnu';
+                    const from = emailMatch ? emailMatch[0] : 'Inconnu';
+                    
+                    // Sujet (première ligne significative)
+                    const lines = text.split(/[.!?]\s+/).filter(l => l.length > 5);
+                    const subject = lines[0] ? lines[0].substring(0, 100) : 'Sans objet';
                     
                     // Date
-                    let date = '';
                     const dateMatch = text.match(/\d{2}[\/-]\d{2}[\/-]\d{4}/) || 
                                     text.match(/\d{2}:\d{2}/) ||
-                                    text.match(/(Aujourd'hui|Hier|Il y a \d+ \w+)/);
-                    date = dateMatch ? dateMatch[0] : 'Date inconnue';
+                                    text.match(/(Aujourd'hui|Hier|Il y a \d+)/);
+                    const date = dateMatch ? dateMatch[0] : '';
                     
                     // Preview
-                    let preview = text.replace(/\s+/g, ' ').trim().substring(0, 150);
+                    const preview = text.substring(0, 150);
                     
                     // Non lu ?
-                    const isUnread = html.includes('bold') || 
-                                   html.includes('font-weight:700') ||
-                                   el.classList.contains('unread') ||
-                                   el.classList.contains('new');
+                    const html = el.innerHTML || '';
+                    const isUnread = html.includes('font-weight:700') || 
+                                   html.includes('font-weight: 700') ||
+                                   html.includes('<b>') ||
+                                   html.includes('<strong>');
                     
                     results.push({
                         id: `email-${index}-${Date.now()}`,
-                        subject: subject || 'Sans objet',
+                        subject: subject,
                         from: from,
                         date: date,
                         preview: preview + '...',
@@ -262,7 +193,7 @@ async function scrapeLaposteEmails() {
                     });
                     
                 } catch (err) {
-                    // Ignorer les erreurs d'extraction individuelles
+                    // Ignorer
                 }
             });
             
@@ -277,12 +208,11 @@ async function scrapeLaposteEmails() {
         };
         
         fs.writeFileSync('emails.json', JSON.stringify(data, null, 2));
-        console.log(`✅ ${emails.length} emails sauvegardés`);
+        console.log(`✅ ${emails.length} emails extraits`);
         
     } catch (error) {
         console.error('❌ Erreur:', error.message);
         
-        // Sauvegarder quand même avec l'erreur
         const errorData = {
             lastUpdate: new Date().toISOString(),
             emailCount: 0,
