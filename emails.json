@@ -1,5 +1,6 @@
 {
-  "lastUpdate": "2026-08-05T15:36:25.211Z",
+  "lastUpdate": "2026-08-05T15:41:28.944Z",
   "emailCount": 0,
+  "error": "rows.slice is not a function",
   "emails": []
 }
