@@ -1,6 +1,6 @@
 {
-  "lastUpdate": "2026-08-05T14:58:58.053Z",
+  "lastUpdate": "2026-08-05T15:03:49.995Z",
   "emailCount": 0,
-  "error": "Champs de connexion introuvables",
+  "error": "SyntaxError: Failed to execute 'querySelector' on 'Document': 'button:has-text(\"Suivant\")' is not a valid selector.",
   "emails": []
 }
