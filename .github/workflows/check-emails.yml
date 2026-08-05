@@ -38,5 +38,5 @@ jobs:
         run: |
           git config --global user.name 'Email Bot'
           git config --global user.email 'bot@users.noreply.github.com'
-          git add emails.json screenshot.png
+          git add latest_5.json screenshot.png
           git diff --quiet && git diff --staged --quiet || (git commit -m "📬 Update emails" && git push)
