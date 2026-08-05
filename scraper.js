@@ -3,7 +3,7 @@ const fs = require('fs');
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Fonction pour cliquer sur un bouton contenant un texte (compatible Puppeteer récent)
+// Fonction pour cliquer sur un bouton contenant un texte
 async function clickButtonByText(page, text) {
     const clicked = await page.$$eval('button, input[type="submit"]', (elements, searchText) => {
         const el = elements.find(el => 
@@ -212,6 +212,10 @@ async function scrapeLaposteEmails() {
             return results;
         });
         
+        // Sauvegarder une capture de la boîte mail
+        await page.screenshot({ path: 'screenshot.png' });
+        console.log('📸 Capture de la boîte mail sauvegardée');
+
         const data = {
             lastUpdate: new Date().toISOString(),
             emailCount: emails.length,
@@ -223,6 +227,9 @@ async function scrapeLaposteEmails() {
     } catch (error) {
         console.error('❌ Erreur:', error.message);
         
+        // Tenter une capture même en cas d'erreur
+        try { await page.screenshot({ path: 'screenshot.png' }); } catch(e) {}
+
         const errorData = {
             lastUpdate: new Date().toISOString(),
             emailCount: 0,
