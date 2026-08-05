@@ -2,8 +2,11 @@ name: Check LaPoste Emails
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # Toutes les 10 minutes
-  workflow_dispatch:  # Permet le lancement manuel
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   scrape-emails:
@@ -12,27 +15,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
       
-      - name: Install dependencies
+      - name: Install Puppeteer
         run: |
           npm init -y
           npm install puppeteer
       
-      - name: Scrape emails from LaPoste
+      - name: Scrape emails
         run: node scraper.js
         env:
           LAPOSTE_EMAIL: ${{ secrets.LAPOSTE_EMAIL }}
           LAPOSTE_PASSWORD: ${{ secrets.LAPOSTE_PASSWORD }}
       
-      - name: Update emails.json
+      - name: Commit and push if changed
         run: |
-          git config --global user.name '📧 Email Bot'
-          git config --global user.email 'email-bot@users.noreply.github.com'
+          git config --global user.name 'Email Bot'
+          git config --global user.email 'bot@users.noreply.github.com'
           git add emails.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "📬 Update emails - $(date +'%Y-%m-%d %H:%M')"
-          git push
+          git diff --quiet && git diff --staged --quiet || (git commit -m "📬 Update emails" && git push)
