@@ -1,6 +1,15 @@
 {
-  "lastUpdate": "2026-08-05T15:41:28.944Z",
-  "emailCount": 0,
-  "error": "rows.slice is not a function",
-  "emails": []
+  "lastUpdate": "2026-08-05T15:48:26.104Z",
+  "emailCount": 1,
+  "emails": [
+    {
+      "id": "email-0-1785944906104",
+      "subject": "43.18",
+      "from": "pierrelouisfruleux@laposte.net",
+      "date": "",
+      "preview": "pierrelouisfruleux@laposte.net...",
+      "isUnread": false,
+      "timestamp": "2026-08-05T15:48:26.104Z"
+    }
+  ]
 }
