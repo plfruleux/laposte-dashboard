@@ -1,1 +1,6 @@
-
+{
+  "lastUpdate": "2026-08-05T14:52:52.549Z",
+  "emailCount": 0,
+  "error": "Waiting for selector `input[type=\"email\"], #email` failed",
+  "emails": []
+}
