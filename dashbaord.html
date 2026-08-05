@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="600"> <!-- Refresh auto toutes les 10 min -->
+    <meta http-equiv="refresh" content="600">
     <title>📧 Dashboard LaPoste.net</title>
     <style>
         :root {
@@ -140,6 +140,37 @@
             color: var(--text-secondary);
         }
 
+        /* Screenshot Section */
+        .screenshot-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .screenshot-header {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            user-select: none;
+        }
+
+        .screenshot-header:hover {
+            color: var(--accent);
+        }
+
+        .screenshot-img {
+            width: 100%;
+            max-height: 500px;
+            object-fit: contain;
+            border-radius: 0.5rem;
+            display: none;
+            border: 1px solid var(--border);
+        }
+
         /* Email List */
         .email-list {
             display: flex;
@@ -248,11 +279,6 @@
             to { transform: rotate(360deg); }
         }
 
-        .empty-icon, .error-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
-
         .footer {
             text-align: center;
             margin-top: 2rem;
@@ -260,7 +286,6 @@
             font-size: 0.875rem;
         }
 
-        /* Responsive */
         @media (max-width: 768px) {
             body { padding: 1rem; }
             .header { padding: 1.5rem; }
@@ -312,6 +337,15 @@
             >
         </div>
 
+        <!-- Screenshot Viewer -->
+        <div class="screenshot-section" id="screenshotSection">
+            <div class="screenshot-header" onclick="toggleScreenshot()">
+                <span>📸</span>
+                <span>Aperçu de la boîte mail (cliquer pour afficher/masquer)</span>
+            </div>
+            <img id="screenshotImg" class="screenshot-img" src="" alt="Capture boîte mail" onerror="this.style.display='none'">
+        </div>
+
         <!-- Email List -->
         <div id="emailContainer">
             <div class="loading-state">
@@ -322,7 +356,7 @@
 
         <!-- Footer -->
         <div class="footer">
-            <p>🔄 Mise à jour automatique toutes les 10 minutes</p>
+            <p>🔄 Mise à jour automatique toutes les 15 minutes</p>
             <p>🔒 Consultation en lecture seule - Aucune modification possible</p>
         </div>
     </div>
@@ -335,7 +369,6 @@
             const connectionStatus = document.getElementById('connectionStatus');
             
             try {
-                // Ajouter un paramètre pour éviter le cache
                 const response = await fetch(`emails.json?t=${Date.now()}`);
                 
                 if (!response.ok) {
@@ -355,6 +388,7 @@
                 
                 displayEmails(allEmails);
                 updateStats(allEmails, data.lastUpdate);
+                refreshScreenshot();
                 
             } catch (error) {
                 console.error('Erreur de chargement:', error);
@@ -448,7 +482,6 @@
         }
 
         function showEmailDetail(subject, from, date, preview) {
-            // Pour une version future : afficher dans une modale
             alert(`📧 ${subject}\n\n👤 ${from}\n📅 ${date}\n\n📝 ${preview}`);
         }
 
@@ -459,11 +492,31 @@
             return div.innerHTML;
         }
 
+        // Gestion de la capture d'écran
+        function toggleScreenshot() {
+            const img = document.getElementById('screenshotImg');
+            if (img.style.display === 'block') {
+                img.style.display = 'none';
+            } else {
+                img.style.display = 'block';
+                refreshScreenshot();
+            }
+        }
+
+        function refreshScreenshot() {
+            const img = document.getElementById('screenshotImg');
+            if (img) {
+                img.src = `screenshot.png?t=${Date.now()}`;
+                img.style.display = img.style.display || 'none'; // Respecter l'état
+            }
+        }
+
         // Chargement initial
         loadEmails();
 
         // Rechargement périodique (10 minutes)
         setInterval(loadEmails, 600000);
+        setInterval(refreshScreenshot, 600000);
     </script>
 </body>
 </html>
