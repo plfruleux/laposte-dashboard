@@ -1,6 +1,6 @@
 {
-  "lastUpdate": "2026-08-05T15:03:49.995Z",
+  "lastUpdate": "2026-08-05T15:05:35.791Z",
   "emailCount": 0,
-  "error": "SyntaxError: Failed to execute 'querySelector' on 'Document': 'button:has-text(\"Suivant\")' is not a valid selector.",
+  "error": "page.$x is not a function",
   "emails": []
 }
