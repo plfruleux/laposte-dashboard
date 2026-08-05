@@ -26,14 +26,15 @@ async function scrapeLaposteEmails() {
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--window-size=1280,720'
+            '--disable-gpu'
         ]
     });
     
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setViewport({ width: 1280, height: 720 });
+    
+    // Vue plus large pour éviter les problèmes de responsive
+    await page.setViewport({ width: 1600, height: 1200 });
     
     try {
         // 1. Connexion
@@ -78,156 +79,186 @@ async function scrapeLaposteEmails() {
         }
         
         console.log('⏳ Attente de la boîte mail...');
-        await wait(10000);
-        
-        // 2. Masquer les éléments parasites
+        await wait(12000); // Attendre que tout soit bien chargé
+
+        // 2. Masquer les parasites de l'interface
         console.log('🧹 Nettoyage de l\'interface...');
         await page.evaluate(() => {
-            // Masquer barres de navigation, menus, dossiers, pubs
+            // Masquer les barres et menus
             const hideSelectors = [
                 'nav', 'header', '.sidebar', '.left-panel', '.folder-list',
                 '.navigation', '.menu', '[role="navigation"]', '#side-menu',
                 '.advertisement', '.pub', '.banner', '[class*="ad-"]',
                 '.toolbar', '.action-bar', '.search-bar',
-                '.mail-footer', '.signature', '.disclaimer'
+                '.mail-footer', '.signature', '.disclaimer',
+                '.compose-btn', '.write-btn', '.new-message', // bouton nouveau message
+                '.pagination', '.page-nav', // navigation des pages
+                '[class*="scrollbar"]', // barres de défilement décoratives
+                'footer'
             ];
             hideSelectors.forEach(sel => {
                 document.querySelectorAll(sel).forEach(el => {
                     el.style.display = 'none';
-                    el.style.visibility = 'hidden';
-                    el.style.height = '0';
-                    el.style.overflow = 'hidden';
                 });
             });
-            
-            // Réduire les marges et paddings de la zone principale
-            const mainArea = document.querySelector('[role="main"], .main-content, #main, .content');
-            if (mainArea) {
-                mainArea.style.margin = '0';
-                mainArea.style.padding = '4px';
-            }
-            
-            // Forcer une police plus petite pour voir plus de texte
-            document.querySelectorAll('.email-subject, .subject, .message-subject').forEach(el => {
-                el.style.fontSize = '12px';
-                el.style.lineHeight = '1.2';
-            });
-            document.querySelectorAll('.email-preview, .snippet, .preview, .message-body').forEach(el => {
-                el.style.fontSize = '11px';
-                el.style.lineHeight = '1.3';
-            });
-            document.querySelectorAll('.email-sender, .from, .sender').forEach(el => {
-                el.style.fontSize = '10px';
-            });
-            
-            // Supprimer les icônes et décorations inutiles
-            document.querySelectorAll('.email-icon, .avatar, .star, .flag, .attachment-icon').forEach(el => {
-                el.style.display = 'none';
-            });
+
+            // Ajuster les styles pour condenser l'information
+            const style = document.createElement('style');
+            style.textContent = `
+                /* Réduire les polices et espacements des emails */
+                .email-row, .message-item, .mail-item, tr[class*="mail"], tr[class*="msg"],
+                div[class*="mail-item"], div[class*="message-item"], div[class*="msg"] {
+                    padding: 2px 4px !important;
+                    margin: 0 !important;
+                    line-height: 1.2 !important;
+                    height: auto !important;
+                    min-height: 0 !important;
+                    border-bottom: 1px solid rgba(0,0,0,0.05) !important;
+                }
+                .email-sender, .from, .sender, [class*="from"], [class*="sender"] {
+                    font-size: 11px !important;
+                    margin: 0 !important;
+                }
+                .email-subject, .subject, [class*="subject"], [class*="objet"] {
+                    font-size: 12px !important;
+                    margin: 0 !important;
+                }
+                .email-preview, .snippet, .preview, .body-preview, [class*="preview"], [class*="body"] {
+                    font-size: 10px !important;
+                    line-height: 1.2 !important;
+                    margin: 0 !important;
+                }
+                /* Supprimer les icônes inutiles */
+                .email-icon, .avatar, .star, .flag, .attachment-icon, .checkbox, .favorite {
+                    display: none !important;
+                }
+            `;
+            document.head.appendChild(style);
         });
         
         await wait(1000);
+
+        // 3. Identifier les lignes d'emails précises
+        console.log('🔍 Identification des 5 premières lignes d\'emails...');
         
-        // 3. Trouver la zone des emails
-        console.log('📸 Recherche de la zone des emails...');
-        
-        const emailZoneSelectors = [
-            '#messages-list', '.messages-list', '.email-list', '#mail-list',
-            '[data-testid="mail-list"]', '.mails-list', '#inbox-list',
-            'div[class*="list"]', 'div[class*="messages"]', '[role="main"]',
-            '.message-container', '.email-container'
-        ];
-        
-        let emailZone = null;
-        for (const sel of emailZoneSelectors) {
-            emailZone = await page.$(sel);
-            if (emailZone) {
-                console.log(`✅ Zone emails trouvée : ${sel}`);
-                break;
-            }
-        }
-        
-        if (!emailZone) {
-            // Fallback : chercher un div qui contient plusieurs @
-            const divs = await page.$$('div');
-            for (const div of divs) {
-                const text = await div.evaluate(el => el.textContent);
-                const atCount = (text.match(/@/g) || []).length;
-                if (atCount >= 3) {
-                    emailZone = div;
-                    console.log('✅ Zone emails trouvée par comptage @');
+        const rowsInfo = await page.evaluate(() => {
+            // Chercher les lignes d'emails
+            const selectors = [
+                'tr[class*="mail"]', 'tr[class*="msg"]', 'tr[class*="message"]',
+                'div[class*="mail-item"]', 'div[class*="message-item"]', 'div[class*="msg-item"]',
+                'li[class*="mail"]', 'li[class*="msg"]', 'li[class*="message"]'
+            ];
+            let rows = [];
+            for (const sel of selectors) {
+                const nodes = document.querySelectorAll(sel);
+                if (nodes.length > 2) {
+                    rows = Array.from(nodes);
                     break;
                 }
             }
-        }
-        
-        // 4. Capture de la zone emails
-        if (emailZone) {
-            // Récupérer les dimensions et la position
-            const box = await emailZone.boundingBox();
-            if (box) {
-                // Calculer une zone 16:9 autour des 5 premiers emails
-                // Hauteur estimée : 5 emails × ~80px = 400px
-                const targetHeight = Math.min(box.height, 400);
-                const targetWidth = Math.round(targetHeight * 16 / 9);
-                
-                // Limiter à la largeur de la zone
-                const width = Math.min(targetWidth, box.width);
-                const height = Math.round(width * 9 / 16);
-                
-                const clip = {
-                    x: box.x,
-                    y: box.y,
-                    width: width,
-                    height: height
-                };
-                
-                console.log(`📸 Capture : ${clip.width}x${clip.height} (16:9)`);
-                await page.screenshot({
-                    path: 'screenshot.png',
-                    clip: clip
+            
+            // Fallback
+            if (rows.length === 0) {
+                const all = document.querySelectorAll('div, tr, li');
+                rows = Array.from(all).filter(el => {
+                    const text = el.textContent || '';
+                    return text.includes('@') && el.children.length >= 2 && el.offsetHeight > 25 && el.offsetHeight < 200;
                 });
-            } else {
-                // Fallback : screenshot de l'élément
-                await emailZone.screenshot({ path: 'screenshot.png' });
-                console.log('📸 Capture de l\'élément complet');
             }
-        } else {
-            // Dernier recours : capture pleine page
-            await page.screenshot({ path: 'screenshot.png', fullPage: false });
-            console.log('⚠️ Capture pleine page (zone non trouvée)');
+
+            // Filtrer les parasites
+            rows = rows.filter(el => {
+                const t = el.textContent || '';
+                return !/Boîte de réception|Dossiers|Menu|Paramètres|Agenda|Contacts|Écrire un mail|Liste de mails|Sélection|Marquer tout comme lu|Vider le dossier|k-error/i.test(t);
+            });
+
+            // Prendre les 5 premières
+            const firstFive = rows.slice(0, 5);
+            
+            // Extraire leurs positions (bounding box)
+            const positions = firstFive.map(el => {
+                const rect = el.getBoundingClientRect();
+                return {
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    left: rect.left,
+                    right: rect.right,
+                    width: rect.width,
+                    height: rect.height
+                };
+            });
+
+            return positions;
+        });
+
+        if (rowsInfo.length === 0) {
+            throw new Error('Aucune ligne d\'email trouvée');
         }
+
+        console.log(`✅ ${rowsInfo.length} lignes d'emails identifiées`);
+
+        // 4. Calculer la zone de capture (16:9)
+        const firstRowTop = rowsInfo[0].top;
+        const lastRowBottom = rowsInfo[rowsInfo.length - 1].bottom;
+        const rowHeight = lastRowBottom - firstRowTop;
         
-        console.log('✅ Capture sauvegardée');
+        // Ajouter 15px de marge en haut et en bas
+        const margin = 15;
+        const captureHeight = rowHeight + margin * 2;
+        // 16:9 => largeur = hauteur * 16/9
+        const captureWidth = Math.round(captureHeight * 16 / 9);
         
-        // 5. Extraire les 5 emails pour latest_5.json
-        console.log('📧 Extraction des 5 derniers emails...');
+        // Centrer horizontalement sur les emails
+        const minLeft = Math.min(...rowsInfo.map(r => r.left));
+        const maxRight = Math.max(...rowsInfo.map(r => r.right));
+        const centerX = (minLeft + maxRight) / 2;
+        const captureLeft = Math.max(0, centerX - captureWidth / 2);
+        const captureTop = firstRowTop - margin;
+
+        const clip = {
+            x: captureLeft,
+            y: Math.max(0, captureTop),
+            width: Math.min(captureWidth, 1600 - captureLeft),
+            height: captureHeight
+        };
+
+        console.log(`📸 Zone de capture : x=${clip.x}, y=${clip.y}, w=${clip.width}, h=${clip.height}`);
+
+        // 5. Capturer uniquement cette zone
+        await page.screenshot({
+            path: 'screenshot.png',
+            clip: clip
+        });
+        console.log('📸 Capture 16:9 sauvegardée');
+
+        // 6. Extraire les données pour latest_5.json
+        console.log('📧 Extraction des données texte...');
         const emails = await page.evaluate(() => {
             const clean = (s) => s.replace(/\s+/g, ' ').trim();
-            const rows = [];
+            const results = [];
             
             const selectors = [
                 'div[class*="msg"]', 'div[class*="mail-item"]', 'div[class*="message-item"]',
                 'tr[class*="mail"]', 'tr[class*="msg"]', 'li[class*="mail"]', 'li[class*="msg"]'
             ];
+            let rows = [];
             for (const sel of selectors) {
                 const nodes = document.querySelectorAll(sel);
-                if (nodes.length >= 2) { rows.push(...Array.from(nodes)); break; }
+                if (nodes.length >= 2) { rows = Array.from(nodes); break; }
             }
             if (rows.length === 0) {
                 const all = document.querySelectorAll('div, tr, li');
-                rows.push(...Array.from(all).filter(el => {
+                rows = Array.from(all).filter(el => {
                     return el.children.length >= 2 && el.textContent.includes('@') && el.offsetHeight > 25 && el.offsetHeight < 200;
-                }));
+                });
             }
             
-            const filtered = rows.filter(el => {
+            rows = rows.filter(el => {
                 const t = el.textContent || '';
                 return !/Boîte de réception|Dossiers|Menu|Paramètres|Agenda|Contacts|Écrire un mail|Liste de mails|Sélection|Marquer tout comme lu|Vider le dossier|k-error/i.test(t);
             });
             
-            const results = [];
-            for (const el of filtered) {
+            for (const el of rows.slice(0, 5)) {
                 try {
                     const text = el.textContent || '';
                     const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
@@ -253,10 +284,9 @@ async function scrapeLaposteEmails() {
                     }
                     
                     results.push({ from, subject, preview });
-                    if (results.length >= 5) break;
                 } catch (e) {}
             }
-            return results.slice(0, 5);
+            return results;
         });
         
         const data = {
@@ -264,7 +294,7 @@ async function scrapeLaposteEmails() {
             emails: emails
         };
         fs.writeFileSync('latest_5.json', JSON.stringify(data));
-        console.log(`✅ ${emails.length} emails extraits`);
+        console.log(`✅ ${emails.length} emails extraits dans latest_5.json`);
         
     } catch (error) {
         console.error('❌ Erreur:', error.message);
