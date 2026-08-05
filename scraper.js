@@ -140,12 +140,10 @@ async function scrapeLaposteEmails() {
         console.log('📄 HTML sauvegardé (debug_page.html)');
         
         // --- CAPTURE D'ÉCRAN DE LA ZONE DES EMAILS ---
-        // Essayer de trouver l'élément qui contient la liste des emails
         const emailListSelectors = [
-            '#messages-list', '.messages-list', '.email-list', '#mail-list',
+            'div[class*="list"]', '#messages-list', '.messages-list', '.email-list',
             '[data-testid="mail-list"]', '.mails-list', '#inbox-list',
-            'div[class*="list"]', 'div[class*="messages"]', 'table[class*="mail"]',
-            '#main-content', '[role="main"]'
+            'div[class*="messages"]', 'table[class*="mail"]', '#main-content', '[role="main"]'
         ];
         let emailListElement = null;
         for (const sel of emailListSelectors) {
@@ -160,36 +158,46 @@ async function scrapeLaposteEmails() {
             await emailListElement.screenshot({ path: 'screenshot.png' });
             console.log('📸 Capture de la zone emails sauvegardée');
         } else {
-            // Fallback : capture de toute la page
             await page.screenshot({ path: 'screenshot.png' });
             console.log('⚠️ Zone emails non trouvée, capture pleine page sauvegardée');
         }
         
-        // --- EXTRACTION DES EMAILS (tentative avec sélecteurs plus larges) ---
+        // --- EXTRACTION DES EMAILS (corrigée) ---
         console.log('📧 Extraction des emails...');
         
         const emails = await page.evaluate(() => {
             const cleanText = (text) => text.replace(/\s+/g, ' ').trim();
             
-            // Sélecteurs pour les lignes individuelles d'emails
-            const rowSelectors = [
-                '.message-item', 'tr[role="row"]', '.mail-item', '.msg-list__item',
-                '[data-testid="mail-item"]', '.email-entry', 'div[class*="mail"]',
-                'li[class*="mail"]', '.list-group-item'
-            ];
-            let rows = [];
-            for (const sel of rowSelectors) {
-                rows = document.querySelectorAll(sel);
-                if (rows.length > 1) break;
+            // 1. Trouver le conteneur de la liste d'emails
+            let listContainer = document.querySelector('div[class*="list"]');
+            if (!listContainer) {
+                // Fallbacks
+                listContainer = document.querySelector('#messages-list, .messages-list, .email-list, [role="main"]');
             }
             
-            // Si rien, chercher des divs/lignes avec une adresse email
-            if (rows.length === 0) {
-                const all = document.querySelectorAll('div, li, tr');
-                rows = Array.from(all).filter(el => {
-                    return el.textContent.includes('@') && el.offsetHeight > 25 && el.offsetHeight < 200;
+            // 2. Dans ce conteneur, chercher les éléments qui ressemblent à des lignes d'emails
+            let rows = [];
+            if (listContainer) {
+                // Chercher des <tr>, <li>, <div> qui contiennent une adresse email
+                const candidates = listContainer.querySelectorAll('tr, li, div[class*="mail"], div[class*="message"], div[class*="item"]');
+                rows = Array.from(candidates).filter(el => {
+                    return el.textContent.includes('@') && el.offsetHeight > 20 && el.offsetHeight < 200;
                 });
             }
+            
+            // Si pas trouvé, recherche globale
+            if (rows.length === 0) {
+                const all = document.querySelectorAll('tr, li, div');
+                rows = Array.from(all).filter(el => {
+                    return el.textContent.includes('@') && el.offsetHeight > 20 && el.offsetHeight < 200;
+                });
+            }
+            
+            // Filtrer les parasites
+            rows = rows.filter(el => {
+                const text = el.textContent || '';
+                return !/k-error-messages|Activer JavaScript|Menu Réduire le menu|Dossiers \(Sauter\)|Liste de mails Sélection|Écrire un mail|Paramètres|Agenda|Contacts/i.test(text);
+            });
             
             const results = [];
             rows.slice(0, 25).forEach((el, idx) => {
@@ -197,23 +205,23 @@ async function scrapeLaposteEmails() {
                     const text = el.textContent || '';
                     const html = el.innerHTML || '';
                     
-                    // Exclure les éléments parasites
-                    if (/k-error-messages|Activer JavaScript|Menu Réduire le menu|Dossiers \(Sauter\)|Liste de mails Sélection/i.test(text)) return;
-                    
+                    // Extraire l'adresse email expéditeur
                     const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
                     const from = emailMatch ? emailMatch[0] : '';
                     
+                    // Sujet : chercher un élément enfant avec une classe subject/objet, sinon première ligne non date/email
                     let subject = '';
                     const subjectEl = el.querySelector('[class*="subject"], [class*="objet"], .subject, .objet');
                     if (subjectEl) subject = cleanText(subjectEl.textContent);
                     else {
                         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1);
-                        subject = lines.find(l => !l.match(/^\d{2}[:\/]\d{2}/) && !l.includes('@')) || '';
+                        subject = lines.find(l => !l.match(/^\d{2}[:\/]\d{2}/) && !l.includes('@') && !l.match(/^(Aujourd'hui|Hier|Il y a)/)) || '';
                         if (!subject) subject = text.substring(0, 80);
                     }
                     subject = subject.replace(emailMatch ? emailMatch[0] : '', '').trim();
                     if (!subject || subject.length < 2) subject = '(Sans objet)';
                     
+                    // Date
                     let date = '';
                     const dateEl = el.querySelector('[class*="date"], time');
                     if (dateEl) date = cleanText(dateEl.textContent);
@@ -222,6 +230,7 @@ async function scrapeLaposteEmails() {
                         date = m ? m[0] : '';
                     }
                     
+                    // Aperçu
                     let preview = '';
                     const previewEl = el.querySelector('[class*="preview"], [class*="snippet"], p');
                     if (previewEl) preview = cleanText(previewEl.textContent).substring(0, 200);
@@ -234,6 +243,7 @@ async function scrapeLaposteEmails() {
                         preview = clean.substring(0, 200);
                     }
                     
+                    // Non lu ?
                     const isUnread = el.classList.contains('unread') || el.classList.contains('new') ||
                                    html.includes('font-weight:700') || html.includes('<b>') || html.includes('<strong>');
                     
@@ -263,7 +273,7 @@ async function scrapeLaposteEmails() {
     } catch (error) {
         console.error('❌ Erreur:', error.message);
         try { 
-            const emailListElement = await page.$('#messages-list, .messages-list, .email-list, [role="main"]');
+            const emailListElement = await page.$('div[class*="list"], #messages-list, .messages-list, [role="main"]');
             if (emailListElement) await emailListElement.screenshot({ path: 'screenshot.png' });
             else await page.screenshot({ path: 'screenshot.png' });
         } catch(e) {}
