@@ -3,14 +3,19 @@ const fs = require('fs');
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Fonction pour cliquer sur un bouton contenant un texte
+// Fonction pour cliquer sur un bouton contenant un texte (compatible Puppeteer récent)
 async function clickButtonByText(page, text) {
-    const button = await page.$x(`//button[contains(text(), '${text}')]`);
-    if (button.length > 0) {
-        await button[0].click();
-        return true;
-    }
-    return false;
+    const clicked = await page.$$eval('button, input[type="submit"]', (elements, searchText) => {
+        const el = elements.find(el => 
+            el.textContent.includes(searchText) || el.value.includes(searchText)
+        );
+        if (el) {
+            el.click();
+            return true;
+        }
+        return false;
+    }, text);
+    return clicked;
 }
 
 async function scrapeLaposteEmails() {
@@ -84,12 +89,10 @@ async function scrapeLaposteEmails() {
         // --- ÉTAPE 2 : VALIDER L'EMAIL ---
         console.log('🔘 Étape 2 : Validation email...');
         
-        // Essayer de cliquer sur "Suivant", "Continuer" ou "Valider"
         let clicked = await clickButtonByText(page, 'Suivant');
         if (!clicked) clicked = await clickButtonByText(page, 'Continuer');
         if (!clicked) clicked = await clickButtonByText(page, 'Valider');
         
-        // Sinon, chercher un bouton submit
         if (!clicked) {
             const submitBtn = await page.$('input[type="submit"], button[type="submit"], #submit_button, #next');
             if (submitBtn) {
