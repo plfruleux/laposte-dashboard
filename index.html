@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="600">
     <title>📧 Dashboard LaPoste.net</title>
     <style>
         :root {
@@ -84,7 +83,7 @@
         .screenshot-btn { background: var(--accent); color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; }
         .screenshot-btn:hover { background: var(--accent-hover); }
 
-        /* Email list (si tu veux garder la liste textuelle) */
+        /* Email list */
         .email-list { display: flex; flex-direction: column; gap: 0.75rem; }
         .email-item {
             background: var(--bg-secondary); border: 1px solid var(--border);
@@ -124,7 +123,7 @@
                     <span class="status-dot"></span>
                     <h1>Dashboard LaPoste.net</h1>
                 </div>
-                <span id="connectionStatus" style="color: var(--text-secondary); font-size: 0.9rem;">Connexion...</span>
+                <span id="connectionStatus" style="color: var(--text-secondary); font-size: 0.9rem;">Chargement...</span>
             </div>
             <div class="stats-grid">
                 <div class="stat-card"><div class="stat-value" id="totalEmails" style="color: var(--accent);">--</div><div class="stat-label">Total Emails</div></div>
@@ -140,10 +139,10 @@
 
         <!-- Aperçu de la boîte mail -->
         <div class="screenshot-section">
-            <div class="screenshot-header">📸 Aperçu de la boîte mail (zone des emails)</div>
+            <div class="screenshot-header">📸 Aperçu de la boîte mail</div>
             <img id="screenshotImg" class="screenshot-img" src="screenshot.png" alt="Capture emails" onerror="this.style.display='none'">
             <div class="screenshot-controls">
-                <button class="screenshot-btn" onclick="refreshScreenshot()">🔄 Actualiser l'image</button>
+                <button class="screenshot-btn" onclick="refreshScreenshot()">🔄 Forcer le rafraîchissement</button>
             </div>
         </div>
 
@@ -152,7 +151,7 @@
         </div>
 
         <div class="footer">
-            <p>🔄 Mise à jour automatique toutes les 15 minutes</p>
+            <p>🔄 Mise à jour automatique toutes les 5 minutes</p>
             <p>🔒 Consultation en lecture seule - Aucune modification possible</p>
         </div>
     </div>
@@ -175,7 +174,7 @@
                 updateStats(allEmails, data.lastUpdate);
                 refreshScreenshot();
             } catch (error) {
-                container.innerHTML = `<div class="error-state"><div class="error-icon">⚠️</div><h3>Impossible de charger les emails</h3><p>${error.message}</p><p>Utilisez l'aperçu ci-dessus.</p></div>`;
+                container.innerHTML = `<div class="error-state"><div class="error-icon">⚠️</div><h3>Erreur de chargement</h3><p>${error.message}</p><p>Voir l'aperçu ci-dessus.</p></div>`;
                 connectionStatus.innerHTML = '❌ Erreur';
                 connectionStatus.style.color = 'var(--danger)';
             }
@@ -184,11 +183,11 @@
         function displayEmails(emails) {
             const container = document.getElementById('emailContainer');
             if (!emails || emails.length === 0) {
-                container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><h3>Aucun email extrait</h3><p>Consultez l'aperçu visuel en attendant.</p></div>`;
+                container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><h3>Aucun email extrait</h3><p>Consultez l'aperçu visuel.</p></div>`;
                 return;
             }
             container.innerHTML = emails.map(email => `
-                <div class="email-item ${email.isUnread ? 'unread' : ''}" onclick="showEmailDetail('${escapeHtml(email.subject)}','${escapeHtml(email.from)}','${escapeHtml(email.date)}','${escapeHtml(email.preview)}')" data-search="${escapeHtml(email.subject)} ${escapeHtml(email.from)} ${escapeHtml(email.preview)}">
+                <div class="email-item ${email.isUnread ? 'unread' : ''}" data-search="${escapeHtml(email.subject)} ${escapeHtml(email.from)} ${escapeHtml(email.preview)}">
                     <div class="email-header">
                         <div class="email-subject">${escapeHtml(email.subject)}</div>
                         <div class="email-badges">
@@ -223,10 +222,6 @@
             });
         }
 
-        function showEmailDetail(subject, from, date, preview) {
-            alert(`📧 ${subject}\n\n👤 ${from}\n📅 ${date}\n\n📝 ${preview}`);
-        }
-
         function escapeHtml(text) {
             if (!text) return '';
             const div = document.createElement('div');
@@ -234,7 +229,7 @@
             return div.innerHTML;
         }
 
-        // Rafraîchissement automatique de la capture toutes les 15 minutes
+        // Rafraîchissement forcé de l'image avec timestamp
         function refreshScreenshot() {
             const img = document.getElementById('screenshotImg');
             if (img) {
@@ -243,10 +238,13 @@
             }
         }
 
+        // Premier chargement
         loadEmails();
         refreshScreenshot();
-        setInterval(loadEmails, 600000);
-        setInterval(refreshScreenshot, 600000);
+
+        // Rafraîchissement automatique toutes les 5 minutes
+        setInterval(loadEmails, 300000);
+        setInterval(refreshScreenshot, 300000);
     </script>
 </body>
 </html>
