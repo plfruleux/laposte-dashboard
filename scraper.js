@@ -144,32 +144,45 @@ async function waitForNoOverlay(page) {
     }
 }
 
+// Nouvelle fonction de détection basée sur les sélecteurs réels de l'interface
 async function findEmailRows(page) {
     return await page.evaluate(() => {
-        const candidates = [];
-        document.querySelectorAll('*').forEach(el => {
-            const text = el.textContent || '';
-            if (!text.includes('@')) return;
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) return;
-            // Hauteur typique d'une ligne d'email (élargie : 15px à 150px)
-            if (rect.height < 15 || rect.height > 150) return;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
-            candidates.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
-        });
-        candidates.sort((a, b) => a.top - b.top);
-        // Déduplication : on ne garde que les éléments qui ne sont pas complètement inclus dans un autre
-        const filtered = [];
-        candidates.forEach(c => {
-            const isInside = filtered.some(f => {
-                // On considère que c est inclus dans f si ses bords sont à l'intérieur avec une marge de 5px
-                return c.top >= f.top - 2 && c.bottom <= f.bottom + 2 && c.left >= f.left - 2 && c.right <= f.right + 2;
+        // Sélecteurs spécifiques à l'interface LaPoste observée dans debug_page.html
+        const selectors = [
+            'tr[class*="message"]',        // lignes de tableau avec classe "message"
+            'tr[class*="mail"]',           // variante
+            'div[data-email-id]',          // div avec attribut data-email-id
+            'div[class*="msg-item"]',
+            'li[class*="msg"]',
+            'div[class*="mail-row"]'
+        ];
+        let rows = [];
+        for (const sel of selectors) {
+            const nodes = document.querySelectorAll(sel);
+            if (nodes.length >= 2) {
+                rows = Array.from(nodes);
+                break;
+            }
+        }
+        // Fallback : tout élément contenant un "@" avec hauteur entre 15 et 150px
+        if (rows.length === 0) {
+            document.querySelectorAll('*').forEach(el => {
+                if (el.textContent.includes('@') && el.offsetHeight >= 15 && el.offsetHeight <= 150) {
+                    rows.push(el);
+                }
             });
-            if (!isInside) filtered.push(c);
+            // Éliminer les parents inclusifs
+            rows = rows.filter(r => {
+                return !rows.some(other => other !== r && other.contains(r));
+            });
+        }
+        // Tri par position verticale
+        rows.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+        // Prendre les 5 premiers et retourner leurs rectangles
+        return rows.slice(0, 5).map(el => {
+            const rect = el.getBoundingClientRect();
+            return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
         });
-        // Prendre les 5 premiers (triés par position verticale)
-        return filtered.slice(0, 5);
     });
 }
 
@@ -220,10 +233,12 @@ async function scrapeLaposteEmails() {
     console.log('🔍 Recherche des lignes emails...');
     let rows = await findEmailRows(page);
 
-    if (rows.length === 0) {
-        console.log('⚠️ Aucune ligne détectée, capture écran complète');
-        await page.screenshot({ path: 'screenshot.png' });
-        fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: 'no rows found' }));
+    // Si moins de 3 lignes, faire une capture plein écran pour debug et quitter
+    if (rows.length < 3) {
+        console.log(`⚠️ Seulement ${rows.length} ligne(s) trouvée(s), capture plein écran pour diagnostic.`);
+        await page.screenshot({ path: 'screenshot.png', fullPage: false });
+        // Sauver quand même un JSON d'erreur
+        fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: `only ${rows.length} rows` }));
         return;
     }
 
@@ -254,7 +269,7 @@ async function scrapeLaposteEmails() {
     await page.screenshot({ path: 'screenshot.png', clip });
     console.log('📸 Capture sauvegardée');
 
-    // Extraction des données textuelles
+    // Extraction JSON
     const emailData = await page.evaluate((rows) => {
         const results = [];
         rows.forEach(r => {
