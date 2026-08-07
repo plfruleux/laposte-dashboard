@@ -84,7 +84,7 @@
         .screenshot-btn { background: var(--accent); color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; }
         .screenshot-btn:hover { background: var(--accent-hover); }
 
-        /* Email list */
+        /* Email list (si tu veux garder la liste textuelle) */
         .email-list { display: flex; flex-direction: column; gap: 0.75rem; }
         .email-item {
             background: var(--bg-secondary); border: 1px solid var(--border);
@@ -138,6 +138,7 @@
             <input type="text" class="search-input" placeholder="🔍 Rechercher par sujet, expéditeur ou contenu..." oninput="filterEmails(this.value)">
         </div>
 
+        <!-- Aperçu de la boîte mail -->
         <div class="screenshot-section">
             <div class="screenshot-header">📸 Aperçu de la boîte mail (zone des emails)</div>
             <img id="screenshotImg" class="screenshot-img" src="screenshot.png" alt="Capture emails" onerror="this.style.display='none'">
@@ -233,6 +234,7 @@
             return div.innerHTML;
         }
 
+        // Rafraîchissement automatique de la capture toutes les 15 minutes
         function refreshScreenshot() {
             const img = document.getElementById('screenshotImg');
             if (img) {
