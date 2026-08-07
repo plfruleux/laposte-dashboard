@@ -109,241 +109,182 @@ async function performLogin(page) {
     await wait(10000 + Math.random() * 5000);
 }
 
+async function findEmailRows(page) {
+    return await page.evaluate(() => {
+        // Récupère TOUS les éléments visibles contenant un "@"
+        const allElements = document.querySelectorAll('*');
+        const candidates = [];
+        allElements.forEach(el => {
+            const text = el.textContent || '';
+            if (!text.includes('@')) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            // Hauteur typique d'une ligne d'email : entre 20px et 100px
+            if (rect.height < 20 || rect.height > 100) return;
+            candidates.push({
+                el,
+                top: rect.top,
+                bottom: rect.bottom,
+                left: rect.left,
+                right: rect.right,
+                height: rect.height
+            });
+        });
+
+        // Trier par position verticale
+        candidates.sort((a, b) => a.top - b.top);
+
+        // Supprimer les doublons : si un élément contient un autre (parent/enfant), on garde le plus petit (l'enfant)
+        const filtered = [];
+        candidates.forEach(c => {
+            // Vérifier si c n'est pas déjà inclus dans un élément déjà gardé
+            const isInside = filtered.some(f => {
+                return c.top >= f.top && c.bottom <= f.bottom && c.left >= f.left && c.right <= f.right;
+            });
+            if (!isInside) {
+                filtered.push(c);
+            }
+        });
+
+        // Exclure les éléments situés dans des zones de navigation (haut de page, barre latérale)
+        const navSelectors = ['nav', 'header', '.sidebar', '#side-menu', '.folder-list', '.left-panel'];
+        const navElements = [];
+        navSelectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => navElements.push(el));
+        });
+        const rows = filtered.filter(item => {
+            return !navElements.some(nav => {
+                const navRect = nav.getBoundingClientRect();
+                return item.top >= navRect.top && item.bottom <= navRect.bottom && item.left >= navRect.left && item.right <= navRect.right;
+            });
+        });
+
+        // Ne garder que les 5 premiers
+        return rows.slice(0, 5).map(r => ({
+            top: r.top,
+            bottom: r.bottom,
+            left: r.left,
+            right: r.right,
+            height: r.height
+        }));
+    });
+}
+
 async function scrapeLaposteEmails() {
-    console.log('🚀 Démarrage du scraping LaPoste.net...');
+    console.log('🚀 Démarrage...');
     
     const browser = await puppeteer.launch({
         headless: 'new',
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-blink-features=AutomationControlled'
-        ]
+        args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu','--disable-blink-features=AutomationControlled']
     });
     
     const page = await browser.newPage();
-    
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR','fr'] });
         window.chrome = { runtime: {} };
     });
-    
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1600, height: 1200 });
     
+    // Connexion avec reconnexion automatique
     let maxRetries = 3;
-    let currentTry = 0;
-    
-    while (currentTry < maxRetries) {
-        currentTry++;
-        console.log(`\n🔄 Tentative ${currentTry}/${maxRetries}`);
+    for (let i = 0; i < maxRetries; i++) {
+        console.log(`\n🔄 Tentative ${i+1}/${maxRetries}`);
         try {
             await page.goto('https://www.laposte.net/accueil', { waitUntil: 'networkidle2', timeout: 30000 });
             await wait(3000);
             let state = await checkPageState(page);
-            console.log(`📊 État : ${state}`);
             if (state === 'error') { await wait(30000); continue; }
             if (state !== 'logged_in') {
                 await performLogin(page);
                 state = await checkPageState(page);
-                console.log(`📊 État après login : ${state}`);
             }
-            if (state === 'error') { await wait(30000); continue; }
-            if (state !== 'logged_in') { await wait(10000); continue; }
-            console.log('✅ Connecté');
-            break;
-        } catch (error) {
-            console.log(`❌ Tentative ${currentTry}: ${error.message}`);
-            if (currentTry === maxRetries) throw error;
+            if (state === 'logged_in') break;
+        } catch (e) {
+            if (i === maxRetries-1) throw e;
             await wait(15000);
         }
     }
 
-    // ---- NETTOYAGE DES PARASITES ----
-    console.log('🧹 Nettoyage de l\'interface...');
-    await page.evaluate(() => {
-        const hideSelectors = [
-            'nav', 'header', '.sidebar', '.left-panel', '.folder-list',
-            '.navigation', '.menu', '[role="navigation"]', '#side-menu',
-            '.advertisement', '.pub', '.banner', '[class*="ad-"]',
-            '.toolbar', '.action-bar', '.search-bar',
-            '.mail-footer', '.signature', '.disclaimer',
-            '.compose-btn', '.write-btn', '.new-message',
-            '.pagination', '.page-nav', 'footer'
-        ];
-        hideSelectors.forEach(sel => {
-            document.querySelectorAll(sel).forEach(el => { el.style.display = 'none'; });
-        });
-    });
-    await wait(1000);
+    // Sauvegarde HTML pour debug (optionnel)
+    const html = await page.content();
+    fs.writeFileSync('debug_page.html', html);
+    console.log('📄 debug_page.html sauvegardé');
 
-    // ---- IDENTIFICATION DES 5 PREMIERS EMAILS (avant compactage) ----
-    console.log('🔍 Identification des 5 premières lignes...');
-    const foundRowsCount = await page.evaluate(() => {
-        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-        // Recherche robuste
-        const selectors = [
-            'tr[class*="mail"]', 'tr[class*="msg"]', 'tr[class*="message"]',
-            'div[class*="mail-item"]', 'div[class*="message-item"]', 'div[class*="msg-item"]',
-            'li[class*="mail"]', 'li[class*="msg"]', 'li[class*="message"]'
-        ];
-        let rows = [];
-        for (const sel of selectors) {
-            const nodes = document.querySelectorAll(sel);
-            if (nodes.length > 1) { rows = Array.from(nodes); break; }
-        }
-        if (rows.length === 0) {
-            // Fallback : tout élément contenant un @ et avec au moins 2 enfants
-            const all = document.querySelectorAll('div, tr, li');
-            rows = Array.from(all).filter(el => {
-                return el.textContent.includes('@') && el.children.length >= 2 && el.offsetHeight > 25 && el.offsetHeight < 300;
-            });
-        }
-        // Filtrer les lignes parasites
-        rows = rows.filter(el => {
-            const t = el.textContent || '';
-            return !/Boîte de réception|Dossiers|Menu|Paramètres|Agenda|Contacts|Écrire un mail|Liste de mails|Sélection|Marquer tout comme lu|Vider le dossier|k-error|une erreur/i.test(t);
-        });
-        const firstFive = rows.slice(0, 5);
-        // Marquer ces lignes pour pouvoir les retrouver après compactage
-        firstFive.forEach(el => el.setAttribute('data-email-row', 'true'));
-        return firstFive.length;
-    });
+    // Attendre que la liste des emails soit bien chargée
+    await wait(3000);
 
-    if (foundRowsCount === 0) {
-        // Si vraiment aucune ligne, on prend une capture plein écran pour debug
-        console.log('⚠️ Aucune ligne trouvée, capture écran complète pour debug');
+    console.log('🔍 Recherche des lignes emails...');
+    let rows = await findEmailRows(page);
+
+    if (rows.length === 0) {
+        console.log('⚠️ Aucune ligne détectée, capture écran complète');
         await page.screenshot({ path: 'screenshot.png' });
-        fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: 'no rows' }));
-        return;
-    }
-    console.log(`✅ ${foundRowsCount} lignes identifiées`);
-
-    // ---- COMPACTAGE DES LIGNES (expéditeur · 30 premiers car. aperçu · heure) ----
-    console.log('🔧 Compactage des lignes...');
-    await page.evaluate(() => {
-        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-        const rows = document.querySelectorAll('[data-email-row="true"]');
-        rows.forEach(el => {
-            const text = el.textContent || '';
-            const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-            if (!emailMatch) return;
-            const from = emailMatch[0];
-            
-            // Aperçu : 30 premiers caractères après avoir enlevé l'expéditeur et la date
-            let preview = '';
-            const previewEl = el.querySelector('[class*="preview"], [class*="snippet"], [class*="body"], p');
-            if (previewEl) preview = clean(previewEl.textContent);
-            else {
-                let cleanText = text;
-                cleanText = cleanText.replace(from, '');
-                cleanText = cleanText.replace(/\d{2}\/\d{2}\/\d{4}/g, '').replace(/\d{2}:\d{2}/g, '');
-                preview = clean(cleanText).substring(0, 30);
-            }
-            
-            // Heure
-            let date = '';
-            const dateEl = el.querySelector('[class*="date"], [class*="time"], .date, .time');
-            if (dateEl) date = clean(dateEl.textContent);
-            else {
-                const m = text.match(/(\d{2}:\d{2})/) || text.match(/(\d{2}\/\d{2}\/\d{4})/) || text.match(/(Aujourd'hui|Hier)/i);
-                date = m ? m[1] : '';
-            }
-            
-            el.innerHTML = `
-                <span style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; white-space: nowrap; display: block; padding: 1px 0;">
-                    <strong style="color: #1a0dab;">${from}</strong>
-                    <span style="color: #333;"> · ${preview.substring(0, 30)}</span>
-                    <span style="color: #888; margin-left: 8px;">${date}</span>
-                </span>
-            `;
-            el.style.margin = '0';
-            el.style.padding = '1px 0';
-            el.style.border = 'none';
-            el.style.height = 'auto';
-        });
-    });
-    await wait(500);
-
-    // ---- MESURE DES LIGNES COMPACTÉES (via l'attribut) ----
-    console.log('📏 Mesure des lignes...');
-    const rowsInfo = await page.evaluate(() => {
-        const rows = document.querySelectorAll('[data-email-row="true"]');
-        return Array.from(rows).map(el => {
-            const rect = el.getBoundingClientRect();
-            return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
-        });
-    });
-
-    if (rowsInfo.length === 0) {
-        console.log('⚠️ Mesure vide, capture plein écran');
-        await page.screenshot({ path: 'screenshot.png' });
-        fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: 'measurement failed' }));
+        fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: 'no rows found' }));
         return;
     }
 
-    // ---- CAPTURE 16:9 ----
-    const firstRowTop = rowsInfo[0].top;
-    const lastRowBottom = rowsInfo[rowsInfo.length - 1].bottom;
-    const rowHeight = lastRowBottom - firstRowTop;
-    const margin = 10;
-    const captureHeight = rowHeight + margin * 2;
-    const captureWidth = Math.round(captureHeight * 16 / 9);
-    const minLeft = Math.min(...rowsInfo.map(r => r.left));
-    const maxRight = Math.max(...rowsInfo.map(r => r.right));
-    const centerX = (minLeft + maxRight) / 2;
-    const captureLeft = Math.max(0, centerX - captureWidth / 2);
-    const captureTop = firstRowTop - margin;
+    console.log(`✅ ${rows.length} lignes trouvées`);
+
+    // Calcul du rectangle englobant
+    const top = rows[0].top;
+    const bottom = rows[rows.length-1].bottom;
+    const left = Math.min(...rows.map(r => r.left));
+    const right = Math.max(...rows.map(r => r.right));
+    const height = bottom - top;
+    const width = right - left;
+
+    // Ajouter une marge de 15px
+    const margin = 15;
+    const clipHeight = height + 2 * margin;
+    const clipWidth = Math.round(clipHeight * 16 / 9);
+
+    // Centrer horizontalement
+    const centerX = (left + right) / 2;
+    const clipLeft = Math.max(0, centerX - clipWidth / 2);
+    const clipTop = Math.max(0, top - margin);
 
     const clip = {
-        x: captureLeft,
-        y: Math.max(0, captureTop),
-        width: Math.min(captureWidth, 1600 - captureLeft),
-        height: captureHeight
+        x: clipLeft,
+        y: clipTop,
+        width: Math.min(clipWidth, 1600 - clipLeft),
+        height: clipHeight
     };
-    console.log(`📸 Capture : x=${clip.x}, y=${clip.y}, w=${clip.width}, h=${clip.height}`);
-    await page.screenshot({ path: 'screenshot.png', clip: clip });
+
+    console.log(`📸 Capture 16:9 : x=${clip.x}, y=${clip.y}, w=${clip.width}, h=${clip.height}`);
+    await page.screenshot({ path: 'screenshot.png', clip });
     console.log('📸 Capture sauvegardée');
 
-    // ---- EXTRACTION JSON ----
-    console.log('📧 Extraction JSON...');
-    const emails = await page.evaluate(() => {
-        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-        const rows = document.querySelectorAll('[data-email-row="true"]');
+    // Extraction basique des expéditeurs et dates (optionnel)
+    const emails = await page.evaluate((rows) => {
+        return rows.map(r => {
+            // Ici on ne peut pas accéder aux éléments, on retourne juste les positions
+            return { from: '', date: '', preview: '' };
+        });
+    }, rows);
+    // Pour avoir les vraies données, on pourrait réexécuter du JS, mais le plus simple est d'utiliser les rectangles.
+    // On va refaire une passe rapide pour récupérer le texte des lignes.
+    const emailData = await page.evaluate((rows) => {
         const results = [];
-        rows.forEach(el => {
+        rows.forEach(r => {
+            // On ne peut pas récupérer l'élément ici, donc on fait une autre méthode :
+            // On va chercher l'élément qui correspond à ces coordonnées.
+            const el = document.elementFromPoint(r.left + 1, r.top + 1);
+            if (!el) return;
             const text = el.textContent || '';
             const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-            if (!emailMatch) return;
-            const from = emailMatch[0];
-            // Sujet (peut être extrait de la ligne d'origine, mais après compactage on ne l'a plus, donc on met un placeholder)
-            let subject = '';
-            // On peut récupérer le sujet depuis l'attribut data-* qu'on aurait pu sauvegarder avant compactage, 
-            // mais pour simplifier, on laisse le sujet vide ou on extrait de l'élément original (avant compactage).
-            // Comme on a perdu l'info, on met le début du preview comme sujet.
-            subject = el.querySelector('span')?.textContent?.split('·')[1]?.trim() || '';
-            let date = '';
-            const dateEl = el.querySelector('[class*="date"], [class*="time"], .date, .time');
-            if (dateEl) date = clean(dateEl.textContent);
-            else {
-                const m = text.match(/(\d{2}:\d{2})/) || text.match(/(\d{2}\/\d{2}\/\d{4})/) || text.match(/(Aujourd'hui|Hier)/i);
-                date = m ? m[1] : '';
-            }
-            let preview = el.querySelector('span')?.textContent?.split('·')[1]?.trim() || '';
-            results.push({ from, subject, date, preview });
+            const from = emailMatch ? emailMatch[0] : '';
+            const dateMatch = text.match(/(\d{2}:\d{2})/) || text.match(/(\d{2}\/\d{2}\/\d{4})/) || text.match(/(Aujourd'hui|Hier)/i);
+            const date = dateMatch ? dateMatch[1] : '';
+            const preview = text.substring(0, 30).replace(from, '').replace(date, '');
+            results.push({ from, date, preview });
         });
         return results;
-    });
-    
-    fs.writeFileSync('latest_5.json', JSON.stringify({
-        lastUpdate: new Date().toISOString(),
-        emails: emails
-    }));
-    console.log(`✅ ${emails.length} emails extraits`);
+    }, rows);
+    fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: emailData }));
+    console.log(`✅ ${emailData.length} emails extraits`);
 }
 
 scrapeLaposteEmails();
