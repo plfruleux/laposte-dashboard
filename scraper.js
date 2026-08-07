@@ -17,6 +17,70 @@ async function clickButtonByText(page, text) {
     return clicked;
 }
 
+// Vérifie si on est bien dans la boîte de réception (présence d'éléments emails)
+async function isLoggedIn(page) {
+    return await page.evaluate(() => {
+        // Cherche au moins 2 éléments qui contiennent un "@"
+        const all = document.querySelectorAll('div, tr, li');
+        let count = 0;
+        for (const el of all) {
+            if (el.textContent.includes('@') && el.offsetHeight > 20) {
+                count++;
+                if (count >= 2) return true;
+            }
+        }
+        return false;
+    });
+}
+
+async function performLogin(page) {
+    console.log('🔐 Connexion...');
+    await page.goto('https://www.laposte.net/accueil', { waitUntil: 'networkidle2', timeout: 30000 });
+    await wait(3000);
+
+    // Cookies
+    try {
+        const cookieBtn = await page.$('#didomi-notice-agree-button');
+        if (cookieBtn) { await cookieBtn.click(); await wait(1000); }
+    } catch (e) {}
+
+    // Email
+    console.log('📧 Saisie email...');
+    let emailInput = await page.$('input[id*="login"]') || await page.$('input[type="email"]') || (await page.$$('input[type="text"]'))[0];
+    if (!emailInput) throw new Error('Champ email introuvable');
+    await emailInput.type(process.env.LAPOSTE_EMAIL);
+
+    // Valider email
+    console.log('🔘 Validation email...');
+    let clicked = await clickButtonByText(page, 'Suivant') || await clickButtonByText(page, 'Continuer') || await clickButtonByText(page, 'Valider');
+    if (!clicked) {
+        const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
+        if (submitBtn) await submitBtn.click();
+        else await page.keyboard.press('Enter');
+    }
+    await wait(3000);
+
+    // Mot de passe
+    console.log('🔐 Saisie mot de passe...');
+    let passwordInput = await page.$('input[type="password"]');
+    if (!passwordInput) {
+        await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+        passwordInput = await page.$('input[type="password"]');
+    }
+    if (!passwordInput) throw new Error('Champ mot de passe introuvable');
+    await passwordInput.type(process.env.LAPOSTE_PASSWORD);
+
+    // Connexion finale
+    console.log('🔘 Connexion finale...');
+    let submitted = await clickButtonByText(page, 'Connexion') || await clickButtonByText(page, 'Se connecter');
+    if (!submitted) {
+        const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
+        if (submitBtn) await submitBtn.click();
+        else await page.keyboard.press('Enter');
+    }
+    await wait(12000);
+}
+
 async function scrapeLaposteEmails() {
     console.log('🚀 Démarrage du scraping LaPoste.net...');
     
@@ -35,51 +99,26 @@ async function scrapeLaposteEmails() {
     await page.setViewport({ width: 1600, height: 1200 });
     
     try {
-        // 1. Connexion
-        console.log('📄 Navigation...');
+        // --- Vérification de connexion ---
+        console.log('🔍 Vérification session...');
+        // On tente d'aller directement sur la boîte mail (si déjà connecté)
         await page.goto('https://www.laposte.net/accueil', { waitUntil: 'networkidle2', timeout: 30000 });
         await wait(3000);
         
-        try {
-            const cookieBtn = await page.$('#didomi-notice-agree-button');
-            if (cookieBtn) { await cookieBtn.click(); await wait(1000); }
-        } catch (e) {}
-        
-        console.log('📧 Saisie email...');
-        let emailInput = await page.$('input[id*="login"]') || await page.$('input[type="email"]') || (await page.$$('input[type="text"]'))[0];
-        if (!emailInput) throw new Error('Champ email introuvable');
-        await emailInput.type(process.env.LAPOSTE_EMAIL);
-        
-        console.log('🔘 Validation email...');
-        let clicked = await clickButtonByText(page, 'Suivant') || await clickButtonByText(page, 'Continuer') || await clickButtonByText(page, 'Valider');
-        if (!clicked) {
-            const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
-            if (submitBtn) await submitBtn.click();
-            else await page.keyboard.press('Enter');
+        const logged = await isLoggedIn(page);
+        if (!logged) {
+            console.log('❌ Non connecté, tentative de reconnexion...');
+            await performLogin(page);
+        } else {
+            console.log('✅ Déjà connecté.');
         }
-        await wait(3000);
-        
-        console.log('🔐 Saisie mot de passe...');
-        let passwordInput = await page.$('input[type="password"]');
-        if (!passwordInput) {
-            await page.waitForSelector('input[type="password"]', { timeout: 10000 });
-            passwordInput = await page.$('input[type="password"]');
-        }
-        if (!passwordInput) throw new Error('Champ mot de passe introuvable');
-        await passwordInput.type(process.env.LAPOSTE_PASSWORD);
-        
-        console.log('🔘 Connexion finale...');
-        let submitted = await clickButtonByText(page, 'Connexion') || await clickButtonByText(page, 'Se connecter');
-        if (!submitted) {
-            const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
-            if (submitBtn) await submitBtn.click();
-            else await page.keyboard.press('Enter');
-        }
-        
-        console.log('⏳ Attente de la boîte mail...');
-        await wait(12000);
 
-        // 2. Nettoyage de l'interface
+        // Double vérification après tentative
+        if (!await isLoggedIn(page)) {
+            throw new Error('Impossible de se connecter à la boîte mail');
+        }
+
+        // 2. Nettoyage de l'interface (comme avant)
         console.log('🧹 Nettoyage de l\'interface...');
         await page.evaluate(() => {
             const hideSelectors = [
@@ -93,40 +132,28 @@ async function scrapeLaposteEmails() {
                 'footer'
             ];
             hideSelectors.forEach(sel => {
-                document.querySelectorAll(sel).forEach(el => {
-                    el.style.display = 'none';
-                });
+                document.querySelectorAll(sel).forEach(el => { el.style.display = 'none'; });
             });
 
             const style = document.createElement('style');
             style.textContent = `
                 .email-row, .message-item, .mail-item, tr[class*="mail"], tr[class*="msg"],
                 div[class*="mail-item"], div[class*="message-item"], div[class*="msg"] {
-                    padding: 2px 4px !important;
-                    margin: 0 !important;
-                    line-height: 1.2 !important;
-                    height: auto !important;
-                    min-height: 0 !important;
+                    padding: 2px 4px !important; margin: 0 !important;
+                    line-height: 1.2 !important; height: auto !important; min-height: 0 !important;
                     border-bottom: 1px solid rgba(0,0,0,0.05) !important;
                 }
                 .email-sender, .from, .sender, [class*="from"], [class*="sender"] {
-                    font-size: 11px !important;
-                    margin: 0 !important;
+                    font-size: 11px !important; margin: 0 !important;
                 }
                 .email-subject, .subject, [class*="subject"], [class*="objet"] {
-                    font-size: 12px !important;
-                    margin: 0 !important;
+                    font-size: 12px !important; margin: 0 !important;
                 }
                 .email-preview, .snippet, .preview, .body-preview, [class*="preview"], [class*="body"] {
-                    font-size: 10px !important;
-                    line-height: 1.2 !important;
-                    margin: 0 !important;
+                    font-size: 10px !important; line-height: 1.2 !important; margin: 0 !important;
                 }
-                /* Garder la date visible et plus grosse */
                 .email-date, .date, .time, [class*="date"], [class*="time"] {
-                    font-size: 10px !important;
-                    color: #666 !important;
-                    white-space: nowrap !important;
+                    font-size: 10px !important; color: #666 !important; white-space: nowrap !important;
                 }
                 .email-icon, .avatar, .star, .flag, .attachment-icon, .checkbox, .favorite {
                     display: none !important;
@@ -134,10 +161,9 @@ async function scrapeLaposteEmails() {
             `;
             document.head.appendChild(style);
         });
-        
         await wait(1000);
 
-        // 3. Identification des lignes d'emails
+        // 3. Identification des lignes d'emails (5 premiers)
         console.log('🔍 Identification des 5 premières lignes...');
         const rowsInfo = await page.evaluate(() => {
             const selectors = [
@@ -148,10 +174,7 @@ async function scrapeLaposteEmails() {
             let rows = [];
             for (const sel of selectors) {
                 const nodes = document.querySelectorAll(sel);
-                if (nodes.length > 2) {
-                    rows = Array.from(nodes);
-                    break;
-                }
+                if (nodes.length > 2) { rows = Array.from(nodes); break; }
             }
             if (rows.length === 0) {
                 const all = document.querySelectorAll('div, tr, li');
@@ -165,18 +188,10 @@ async function scrapeLaposteEmails() {
                 return !/Boîte de réception|Dossiers|Menu|Paramètres|Agenda|Contacts|Écrire un mail|Liste de mails|Sélection|Marquer tout comme lu|Vider le dossier|k-error/i.test(t);
             });
             const firstFive = rows.slice(0, 5);
-            const positions = firstFive.map(el => {
+            return firstFive.map(el => {
                 const rect = el.getBoundingClientRect();
-                return {
-                    top: rect.top,
-                    bottom: rect.bottom,
-                    left: rect.left,
-                    right: rect.right,
-                    width: rect.width,
-                    height: rect.height
-                };
+                return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
             });
-            return positions;
         });
 
         if (rowsInfo.length === 0) throw new Error('Aucune ligne d\'email trouvée');
@@ -201,12 +216,11 @@ async function scrapeLaposteEmails() {
             width: Math.min(captureWidth, 1600 - captureLeft),
             height: captureHeight
         };
-
         console.log(`📸 Capture : x=${clip.x}, y=${clip.y}, w=${clip.width}, h=${clip.height}`);
         await page.screenshot({ path: 'screenshot.png', clip: clip });
         console.log('📸 Capture 16:9 sauvegardée');
 
-        // 5. Extraction des données texte (avec date)
+        // 5. Extraction des données pour latest_5.json (avec date)
         console.log('📧 Extraction des données...');
         const emails = await page.evaluate(() => {
             const clean = (s) => s.replace(/\s+/g, ' ').trim();
@@ -230,7 +244,6 @@ async function scrapeLaposteEmails() {
                 const t = el.textContent || '';
                 return !/Boîte de réception|Dossiers|Menu|Paramètres|Agenda|Contacts|Écrire un mail|Liste de mails|Sélection|Marquer tout comme lu|Vider le dossier|k-error/i.test(t);
             });
-            
             for (const el of rows.slice(0, 5)) {
                 try {
                     const text = el.textContent || '';
@@ -247,12 +260,10 @@ async function scrapeLaposteEmails() {
                     }
                     subject = subject.replace(from, '').trim() || '(Sans objet)';
                     
-                    // Date : chercher un élément spécifique ou une correspondance dans le texte
                     let date = '';
                     const dateEl = el.querySelector('[class*="date"], [class*="time"], .date, .time');
                     if (dateEl) date = clean(dateEl.textContent);
                     else {
-                        // Chercher HH:MM ou JJ/MM/AAAA ou Aujourd'hui/Hier
                         const m = text.match(/(\d{2}:\d{2})/) || text.match(/(\d{2}\/\d{2}\/\d{4})/) || text.match(/(Aujourd'hui|Hier)/i);
                         date = m ? m[1] : '';
                     }
@@ -272,13 +283,12 @@ async function scrapeLaposteEmails() {
             return results;
         });
         
-        const data = {
+        fs.writeFileSync('latest_5.json', JSON.stringify({
             lastUpdate: new Date().toISOString(),
             emails: emails
-        };
-        fs.writeFileSync('latest_5.json', JSON.stringify(data));
-        console.log(`✅ ${emails.length} emails extraits avec date`);
-        
+        }));
+        console.log(`✅ ${emails.length} emails extraits`);
+
     } catch (error) {
         console.error('❌ Erreur:', error.message);
         fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: error.message }));
