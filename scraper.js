@@ -109,64 +109,70 @@ async function performLogin(page) {
     await wait(10000 + Math.random() * 5000);
 }
 
+// Fonction pour attendre la disparition de l'overlay de chargement
+async function waitForNoOverlay(page) {
+    console.log('⏳ Attente disparition overlay de chargement...');
+    // Sélecteurs typiques d'overlay LaPoste
+    const overlaySelectors = [
+        '.loading-overlay', '.spinner', '[class*="loading"]', '[class*="spinner"]',
+        '.m-loading', '.laposte-loading', '#loading', '.overlay'
+    ];
+    try {
+        // Attendre que tous les éléments correspondants soient invisibles ou disparaissent
+        await page.waitForFunction((selectors) => {
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && el.offsetParent !== null) { // visible
+                    return false;
+                }
+            }
+            return true;
+        }, { timeout: 30000, polling: 'raf' }, overlaySelectors);
+        console.log('✅ Overlay disparu');
+    } catch (e) {
+        console.log('⚠️ Overlay toujours présent après 30s, on le supprime manuellement');
+        // Suppression manuelle
+        await page.evaluate((selectors) => {
+            selectors.forEach(sel => {
+                document.querySelectorAll(sel).forEach(el => el.remove());
+            });
+            // Supprimer aussi les éléments avec un fond semi-transparent qui pourraient être des overlays
+            document.querySelectorAll('*').forEach(el => {
+                const style = window.getComputedStyle(el);
+                if ((style.position === 'fixed' || style.position === 'absolute') && 
+                    parseFloat(style.opacity) < 1 && 
+                    el.offsetWidth > window.innerWidth * 0.5 && 
+                    el.offsetHeight > window.innerHeight * 0.5) {
+                    el.remove();
+                }
+            });
+        }, overlaySelectors);
+        await wait(2000);
+    }
+}
+
 async function findEmailRows(page) {
     return await page.evaluate(() => {
-        // Récupère TOUS les éléments visibles contenant un "@"
-        const allElements = document.querySelectorAll('*');
         const candidates = [];
-        allElements.forEach(el => {
+        document.querySelectorAll('*').forEach(el => {
             const text = el.textContent || '';
             if (!text.includes('@')) return;
             const rect = el.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
-            // Hauteur typique d'une ligne d'email : entre 20px et 100px
             if (rect.height < 20 || rect.height > 100) return;
-            candidates.push({
-                el,
-                top: rect.top,
-                bottom: rect.bottom,
-                left: rect.left,
-                right: rect.right,
-                height: rect.height
-            });
+            // Vérifier que l'élément n'est pas masqué
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+            candidates.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
         });
-
-        // Trier par position verticale
         candidates.sort((a, b) => a.top - b.top);
-
-        // Supprimer les doublons : si un élément contient un autre (parent/enfant), on garde le plus petit (l'enfant)
+        // Supprimer les doublons (inclusion)
         const filtered = [];
         candidates.forEach(c => {
-            // Vérifier si c n'est pas déjà inclus dans un élément déjà gardé
-            const isInside = filtered.some(f => {
-                return c.top >= f.top && c.bottom <= f.bottom && c.left >= f.left && c.right <= f.right;
-            });
-            if (!isInside) {
-                filtered.push(c);
-            }
+            const isInside = filtered.some(f => c.top >= f.top && c.bottom <= f.bottom && c.left >= f.left && c.right <= f.right);
+            if (!isInside) filtered.push(c);
         });
-
-        // Exclure les éléments situés dans des zones de navigation (haut de page, barre latérale)
-        const navSelectors = ['nav', 'header', '.sidebar', '#side-menu', '.folder-list', '.left-panel'];
-        const navElements = [];
-        navSelectors.forEach(sel => {
-            document.querySelectorAll(sel).forEach(el => navElements.push(el));
-        });
-        const rows = filtered.filter(item => {
-            return !navElements.some(nav => {
-                const navRect = nav.getBoundingClientRect();
-                return item.top >= navRect.top && item.bottom <= navRect.bottom && item.left >= navRect.left && item.right <= navRect.right;
-            });
-        });
-
-        // Ne garder que les 5 premiers
-        return rows.slice(0, 5).map(r => ({
-            top: r.top,
-            bottom: r.bottom,
-            left: r.left,
-            right: r.right,
-            height: r.height
-        }));
+        return filtered.slice(0, 5);
     });
 }
 
@@ -188,7 +194,7 @@ async function scrapeLaposteEmails() {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1600, height: 1200 });
     
-    // Connexion avec reconnexion automatique
+    // Connexion
     let maxRetries = 3;
     for (let i = 0; i < maxRetries; i++) {
         console.log(`\n🔄 Tentative ${i+1}/${maxRetries}`);
@@ -208,14 +214,16 @@ async function scrapeLaposteEmails() {
         }
     }
 
-    // Sauvegarde HTML pour debug (optionnel)
+    // Sauvegarder la page après login pour debug
     const html = await page.content();
     fs.writeFileSync('debug_page.html', html);
     console.log('📄 debug_page.html sauvegardé');
 
-    // Attendre que la liste des emails soit bien chargée
-    await wait(3000);
+    // Attendre disparition de l'overlay
+    await waitForNoOverlay(page);
+    await wait(2000); // laisser le temps à la liste de se charger après overlay
 
+    // Recherche des lignes emails
     console.log('🔍 Recherche des lignes emails...');
     let rows = await findEmailRows(page);
 
@@ -228,7 +236,6 @@ async function scrapeLaposteEmails() {
 
     console.log(`✅ ${rows.length} lignes trouvées`);
 
-    // Calcul du rectangle englobant
     const top = rows[0].top;
     const bottom = rows[rows.length-1].bottom;
     const left = Math.min(...rows.map(r => r.left));
@@ -236,12 +243,9 @@ async function scrapeLaposteEmails() {
     const height = bottom - top;
     const width = right - left;
 
-    // Ajouter une marge de 15px
     const margin = 15;
     const clipHeight = height + 2 * margin;
     const clipWidth = Math.round(clipHeight * 16 / 9);
-
-    // Centrer horizontalement
     const centerX = (left + right) / 2;
     const clipLeft = Math.max(0, centerX - clipWidth / 2);
     const clipTop = Math.max(0, top - margin);
@@ -257,20 +261,10 @@ async function scrapeLaposteEmails() {
     await page.screenshot({ path: 'screenshot.png', clip });
     console.log('📸 Capture sauvegardée');
 
-    // Extraction basique des expéditeurs et dates (optionnel)
-    const emails = await page.evaluate((rows) => {
-        return rows.map(r => {
-            // Ici on ne peut pas accéder aux éléments, on retourne juste les positions
-            return { from: '', date: '', preview: '' };
-        });
-    }, rows);
-    // Pour avoir les vraies données, on pourrait réexécuter du JS, mais le plus simple est d'utiliser les rectangles.
-    // On va refaire une passe rapide pour récupérer le texte des lignes.
+    // Extraction des données
     const emailData = await page.evaluate((rows) => {
         const results = [];
         rows.forEach(r => {
-            // On ne peut pas récupérer l'élément ici, donc on fait une autre méthode :
-            // On va chercher l'élément qui correspond à ces coordonnées.
             const el = document.elementFromPoint(r.left + 1, r.top + 1);
             if (!el) return;
             const text = el.textContent || '';
