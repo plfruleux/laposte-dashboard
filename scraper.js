@@ -109,34 +109,27 @@ async function performLogin(page) {
     await wait(10000 + Math.random() * 5000);
 }
 
-// Fonction pour attendre la disparition de l'overlay de chargement
 async function waitForNoOverlay(page) {
     console.log('⏳ Attente disparition overlay de chargement...');
-    // Sélecteurs typiques d'overlay LaPoste
     const overlaySelectors = [
         '.loading-overlay', '.spinner', '[class*="loading"]', '[class*="spinner"]',
         '.m-loading', '.laposte-loading', '#loading', '.overlay'
     ];
     try {
-        // Attendre que tous les éléments correspondants soient invisibles ou disparaissent
         await page.waitForFunction((selectors) => {
             for (const sel of selectors) {
                 const el = document.querySelector(sel);
-                if (el && el.offsetParent !== null) { // visible
-                    return false;
-                }
+                if (el && el.offsetParent !== null) return false;
             }
             return true;
         }, { timeout: 30000, polling: 'raf' }, overlaySelectors);
         console.log('✅ Overlay disparu');
     } catch (e) {
-        console.log('⚠️ Overlay toujours présent après 30s, on le supprime manuellement');
-        // Suppression manuelle
+        console.log('⚠️ Overlay toujours présent après 30s, suppression manuelle');
         await page.evaluate((selectors) => {
             selectors.forEach(sel => {
                 document.querySelectorAll(sel).forEach(el => el.remove());
             });
-            // Supprimer aussi les éléments avec un fond semi-transparent qui pourraient être des overlays
             document.querySelectorAll('*').forEach(el => {
                 const style = window.getComputedStyle(el);
                 if ((style.position === 'fixed' || style.position === 'absolute') && 
@@ -159,19 +152,23 @@ async function findEmailRows(page) {
             if (!text.includes('@')) return;
             const rect = el.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
-            if (rect.height < 20 || rect.height > 100) return;
-            // Vérifier que l'élément n'est pas masqué
+            // Hauteur typique d'une ligne d'email (élargie : 15px à 150px)
+            if (rect.height < 15 || rect.height > 150) return;
             const style = window.getComputedStyle(el);
             if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
             candidates.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
         });
         candidates.sort((a, b) => a.top - b.top);
-        // Supprimer les doublons (inclusion)
+        // Déduplication : on ne garde que les éléments qui ne sont pas complètement inclus dans un autre
         const filtered = [];
         candidates.forEach(c => {
-            const isInside = filtered.some(f => c.top >= f.top && c.bottom <= f.bottom && c.left >= f.left && c.right <= f.right);
+            const isInside = filtered.some(f => {
+                // On considère que c est inclus dans f si ses bords sont à l'intérieur avec une marge de 5px
+                return c.top >= f.top - 2 && c.bottom <= f.bottom + 2 && c.left >= f.left - 2 && c.right <= f.right + 2;
+            });
             if (!isInside) filtered.push(c);
         });
+        // Prendre les 5 premiers (triés par position verticale)
         return filtered.slice(0, 5);
     });
 }
@@ -195,9 +192,8 @@ async function scrapeLaposteEmails() {
     await page.setViewport({ width: 1600, height: 1200 });
     
     // Connexion
-    let maxRetries = 3;
-    for (let i = 0; i < maxRetries; i++) {
-        console.log(`\n🔄 Tentative ${i+1}/${maxRetries}`);
+    for (let i = 0; i < 3; i++) {
+        console.log(`\n🔄 Tentative ${i+1}/3`);
         try {
             await page.goto('https://www.laposte.net/accueil', { waitUntil: 'networkidle2', timeout: 30000 });
             await wait(3000);
@@ -209,21 +205,18 @@ async function scrapeLaposteEmails() {
             }
             if (state === 'logged_in') break;
         } catch (e) {
-            if (i === maxRetries-1) throw e;
+            if (i === 2) throw e;
             await wait(15000);
         }
     }
 
-    // Sauvegarder la page après login pour debug
     const html = await page.content();
     fs.writeFileSync('debug_page.html', html);
     console.log('📄 debug_page.html sauvegardé');
 
-    // Attendre disparition de l'overlay
     await waitForNoOverlay(page);
-    await wait(2000); // laisser le temps à la liste de se charger après overlay
+    await wait(2000);
 
-    // Recherche des lignes emails
     console.log('🔍 Recherche des lignes emails...');
     let rows = await findEmailRows(page);
 
@@ -261,7 +254,7 @@ async function scrapeLaposteEmails() {
     await page.screenshot({ path: 'screenshot.png', clip });
     console.log('📸 Capture sauvegardée');
 
-    // Extraction des données
+    // Extraction des données textuelles
     const emailData = await page.evaluate((rows) => {
         const results = [];
         rows.forEach(r => {
