@@ -144,45 +144,28 @@ async function waitForNoOverlay(page) {
     }
 }
 
-// Nouvelle fonction de détection basée sur les sélecteurs réels de l'interface
 async function findEmailRows(page) {
     return await page.evaluate(() => {
-        // Sélecteurs spécifiques à l'interface LaPoste observée dans debug_page.html
-        const selectors = [
-            'tr[class*="message"]',        // lignes de tableau avec classe "message"
-            'tr[class*="mail"]',           // variante
-            'div[data-email-id]',          // div avec attribut data-email-id
-            'div[class*="msg-item"]',
-            'li[class*="msg"]',
-            'div[class*="mail-row"]'
-        ];
-        let rows = [];
-        for (const sel of selectors) {
-            const nodes = document.querySelectorAll(sel);
-            if (nodes.length >= 2) {
-                rows = Array.from(nodes);
-                break;
-            }
-        }
-        // Fallback : tout élément contenant un "@" avec hauteur entre 15 et 150px
-        if (rows.length === 0) {
-            document.querySelectorAll('*').forEach(el => {
-                if (el.textContent.includes('@') && el.offsetHeight >= 15 && el.offsetHeight <= 150) {
-                    rows.push(el);
-                }
-            });
-            // Éliminer les parents inclusifs
-            rows = rows.filter(r => {
-                return !rows.some(other => other !== r && other.contains(r));
-            });
-        }
-        // Tri par position verticale
-        rows.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-        // Prendre les 5 premiers et retourner leurs rectangles
-        return rows.slice(0, 5).map(el => {
+        const candidates = [];
+        document.querySelectorAll('*').forEach(el => {
+            const text = el.textContent || '';
+            if (!text.includes('@')) return;
             const rect = el.getBoundingClientRect();
-            return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+            if (rect.width === 0 || rect.height === 0) return;
+            if (rect.height < 15 || rect.height > 150) return;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+            candidates.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
         });
+        candidates.sort((a, b) => a.top - b.top);
+        const filtered = [];
+        candidates.forEach(c => {
+            const isInside = filtered.some(f => 
+                c.top >= f.top - 2 && c.bottom <= f.bottom + 2 && c.left >= f.left - 2 && c.right <= f.right + 2
+            );
+            if (!isInside) filtered.push(c);
+        });
+        return filtered.slice(0, 5);
     });
 }
 
@@ -204,7 +187,7 @@ async function scrapeLaposteEmails() {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1600, height: 1200 });
     
-    // Connexion
+    // Connexion avec 3 tentatives
     for (let i = 0; i < 3; i++) {
         console.log(`\n🔄 Tentative ${i+1}/3`);
         try {
@@ -233,11 +216,9 @@ async function scrapeLaposteEmails() {
     console.log('🔍 Recherche des lignes emails...');
     let rows = await findEmailRows(page);
 
-    // Si moins de 3 lignes, faire une capture plein écran pour debug et quitter
     if (rows.length < 3) {
-        console.log(`⚠️ Seulement ${rows.length} ligne(s) trouvée(s), capture plein écran pour diagnostic.`);
+        console.log(`⚠️ Seulement ${rows.length} ligne(s) détectée(s). Capture plein écran pour diagnostic.`);
         await page.screenshot({ path: 'screenshot.png', fullPage: false });
-        // Sauver quand même un JSON d'erreur
         fs.writeFileSync('latest_5.json', JSON.stringify({ lastUpdate: new Date().toISOString(), emails: [], error: `only ${rows.length} rows` }));
         return;
     }
