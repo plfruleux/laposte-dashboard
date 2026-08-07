@@ -137,7 +137,6 @@
             <input type="text" class="search-input" placeholder="🔍 Rechercher par sujet, expéditeur ou contenu..." oninput="filterEmails(this.value)">
         </div>
 
-        <!-- Aperçu de la boîte mail -->
         <div class="screenshot-section">
             <div class="screenshot-header">📸 Aperçu de la boîte mail</div>
             <img id="screenshotImg" class="screenshot-img" src="screenshot.png" alt="Capture emails" onerror="this.style.display='none'">
@@ -229,7 +228,6 @@
             return div.innerHTML;
         }
 
-        // Rafraîchissement forcé de l'image avec timestamp
         function refreshScreenshot() {
             const img = document.getElementById('screenshotImg');
             if (img) {
@@ -238,11 +236,8 @@
             }
         }
 
-        // Premier chargement
         loadEmails();
         refreshScreenshot();
-
-        // Rafraîchissement automatique toutes les 5 minutes
         setInterval(loadEmails, 300000);
         setInterval(refreshScreenshot, 300000);
     </script>
